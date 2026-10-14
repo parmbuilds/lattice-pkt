@@ -8,11 +8,14 @@ from pathlib import Path
 import psycopg
 import pytest
 import uvicorn
+from alembic import command
+from alembic.config import Config
 from testcontainers.community.postgres import PostgresContainer
 
 from app.config import Settings
 
-ROLES_SQL = Path(__file__).resolve().parents[2] / "db" / "init" / "01-roles.sql"
+BACKEND = Path(__file__).resolve().parents[1]
+ROLES_SQL = BACKEND.parent / "db" / "init" / "01-roles.sql"
 
 
 def _bootstrap_roles(superuser_dsn: str) -> None:
@@ -32,11 +35,23 @@ def pg() -> Iterator[dict[str, str]]:
         host = container.get_container_host_ip()
         port = container.get_exposed_port(5432)
         _bootstrap_roles(f"postgresql://postgres:postgres@{host}:{port}/lattice")
-        yield {
+        urls = {
             "app": f"postgresql+psycopg://lattice_app:lattice_app_dev@{host}:{port}/lattice",
             "owner": f"postgresql+psycopg://lattice_owner:lattice_owner_dev@{host}:{port}/lattice",
             "superuser": f"postgresql://postgres:postgres@{host}:{port}/lattice",
         }
+        _migrate(urls["owner"])
+        yield urls
+
+
+def _migrate(owner_url: str) -> None:
+    config = Config(str(BACKEND / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", owner_url)
+    command.upgrade(config, "head")
+
+
+def plain_dsn(url: str) -> str:
+    return url.replace("postgresql+psycopg://", "postgresql://")
 
 
 @pytest.fixture(scope="session")
