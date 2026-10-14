@@ -1,0 +1,16 @@
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vitest/config'
+
+// Same origin everywhere (KTD12): the dev server proxies the API and MCP to FastAPI.
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': 'http://127.0.0.1:8000',
+      '/mcp': 'http://127.0.0.1:8000',
+    },
+  },
+  test: {
+    environment: 'jsdom',
+  },
+})
