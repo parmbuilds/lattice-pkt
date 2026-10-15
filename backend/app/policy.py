@@ -69,6 +69,9 @@ class Action(StrEnum):
     CHANGE_ROLE = "change_role"
     TRANSFER_OWNERSHIP = "transfer_ownership"
     MANAGE_OWN_TOKENS = "manage_own_tokens"
+    CREATE_WORKSPACE = "create_workspace"
+    REVOKE_INVITE = "revoke_invite"
+    ACCEPT_INVITE = "accept_invite"
 
 
 @dataclass(frozen=True)
@@ -157,8 +160,10 @@ def read_clause(subject: Subject, action: Action, d=None, v=None) -> ColumnEleme
 
 def readable_versions(subject: Subject, action: Action) -> Select:
     d, v = Document.__table__, _versions()
-    return select(v.c.id).select_from(v.join(d, v.c.document_id == d.c.id)).where(
-        read_clause(subject, action, d, v)
+    return (
+        select(v.c.id)
+        .select_from(v.join(d, v.c.document_id == d.c.id))
+        .where(read_clause(subject, action, d, v))
     )
 
 
@@ -238,7 +243,16 @@ def _rule_for(
         return "create.member"  # R15: any member adds documents (as drafts)
     if action is Action.MANAGE_OWN_TOKENS:
         return "tokens.own"  # R22
-    if action in (Action.MANAGE_GROUPS, Action.VIEW_ROSTER, Action.VIEW_AUDIT):
+    if action is Action.CREATE_WORKSPACE:
+        return "workspace.create" if owner else None  # R4: the creator is the owner
+    if action is Action.ACCEPT_INVITE:
+        return "invite.accepted"  # recorded once the new membership exists (R6)
+    if action in (
+        Action.MANAGE_GROUPS,
+        Action.VIEW_ROSTER,
+        Action.VIEW_AUDIT,
+        Action.REVOKE_INVITE,
+    ):
         return f"{action}.manager" if manager else None  # R10, R30
 
     if action is Action.INVITE:  # R5: admins invite members; the owner invites both

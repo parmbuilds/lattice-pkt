@@ -54,3 +54,33 @@ def seed_workspace(pg: dict[str, str], members: dict[str, str]) -> str:
                 (workspace_id, uid, role),
             )
     return str(workspace_id)
+
+
+@asynccontextmanager
+async def signed_in(settings: Settings, app=None) -> AsyncIterator[httpx.AsyncClient]:
+    """A signed-in client with its CSRF header set; `client.user_id` holds the user's id."""
+    async with api_client(settings, app) as client:
+        client.headers["X-CSRF-Token"] = await sign_up_and_in(client)
+        client.user_id = await user_id(client)
+        yield client
+
+
+async def create_workspace(client: httpx.AsyncClient, name: str = "Acme") -> str:
+    response = await client.post("/api/workspaces", json={"name": name})
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+async def invite(client: httpx.AsyncClient, workspace_id: str, role: str = "member") -> str:
+    """Return the invite token taken from the link's fragment."""
+    response = await client.post(f"/api/workspaces/{workspace_id}/invites", json={"role": role})
+    response.raise_for_status()
+    return response.json()["invite_url"].split("#", 1)[1]
+
+
+async def join(
+    owner: httpx.AsyncClient, workspace_id: str, newcomer: httpx.AsyncClient, role: str = "member"
+) -> None:
+    token = await invite(owner, workspace_id, role)
+    response = await newcomer.post("/api/invites/accept", json={"token": token})
+    response.raise_for_status()

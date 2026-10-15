@@ -41,9 +41,14 @@ async def record(
     version_id: UUID | None = None,
     returned_version_ids: Iterable[UUID] | None = None,
     detail: dict[str, Any] | None = None,
+    holder_of_secret: bool = False,
 ) -> None:
-    """Write one audit row. Never pass secrets or document bodies in `detail`."""
-    if subject.role is None:
+    """Write one audit row. Never pass secrets or document bodies in `detail`.
+
+    `holder_of_secret` admits a non-member who presented a genuine workspace secret (an invite
+    link), so a rejected use is still traceable without letting outsiders flood the trail.
+    """
+    if subject.role is None and not holder_of_secret:
         # Outsiders cannot write into a workspace's trail (Assumptions); keep a log line instead.
         log.info(
             "non-member request user=%s workspace=%s action=%s",

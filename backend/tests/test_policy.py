@@ -68,6 +68,7 @@ WRITE_MATRIX = [
     (Action.TRANSFER_OWNERSHIP, {"target_role": "admin"}, None, (Y, N, N, N)),
     (Action.TRANSFER_OWNERSHIP, {"target_role": "member"}, None, (N, N, N, N)),
     (Action.MANAGE_OWN_TOKENS, {}, None, (Y, Y, Y, Y)),
+    (Action.REVOKE_INVITE, {}, None, (Y, Y, N, N)),
 ]
 
 
