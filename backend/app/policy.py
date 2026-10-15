@@ -74,6 +74,8 @@ class Action(StrEnum):
     REVIEW = "review"
     LIST_DOCUMENTS = "list_documents"
     SEARCH = "search"
+    MANAGE_ENTITIES = "manage_entities"
+    READ_GRAPH = "read_graph"
 
 
 @dataclass(frozen=True)
@@ -247,6 +249,8 @@ def _rule_for(
         return "list.member"  # each row is then filtered by the VIEW read rules
     if action is Action.SEARCH:
         return "search.member"  # results are filtered in the query by the RETRIEVE rules
+    if action is Action.READ_GRAPH:
+        return "graph.member"  # mentions are filtered in the query by the RETRIEVE rules (R22)
     if action is Action.MANAGE_OWN_TOKENS:
         return "tokens.own"  # R22
     if action is Action.CREATE_WORKSPACE:
@@ -258,6 +262,7 @@ def _rule_for(
         Action.VIEW_ROSTER,
         Action.VIEW_AUDIT,
         Action.REVOKE_INVITE,
+        Action.MANAGE_ENTITIES,  # R21
     ):
         return f"{action}.manager" if manager else None  # R10, R30
 

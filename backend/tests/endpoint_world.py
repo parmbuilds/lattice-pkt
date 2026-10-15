@@ -61,6 +61,7 @@ class World:
     groups: dict[str, str]  # G: author + reader; H: other
     docs: dict[str, dict[str, str]]  # name -> {"id", "v1", "v2", ...}
     invite_id: str = ""
+    entity: str = ""  # "checkout", alias "payments"
     invite_token: str = ""
     tokens: dict[str, str] = field(default_factory=dict)  # actor -> own access token id
     token_values: dict[str, str] = field(default_factory=dict)  # actor -> that token's value
@@ -150,6 +151,9 @@ async def build_world(settings: Settings, pg: dict[str, str], app) -> AsyncItera
         await approve("private", world.docs["private"]["v1"])
         # draft: a first draft by the author, never approved.
         world.docs["draft"] = await add(author, "Draft notes", "Checkout scaling ideas.")
+
+        entity = {"name": "checkout", "aliases": ["payments"]}
+        world.entity = (await _ok(await o.post(world.url("/entities"), json=entity)))["id"]
 
         invite = await _ok(await o.post(world.url("/invites"), json={"role": "member"}))
         world.invite_id, world.invite_token = invite["id"], invite["invite_url"].split("#", 1)[1]

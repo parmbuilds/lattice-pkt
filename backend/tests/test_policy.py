@@ -115,6 +115,17 @@ def test_mcp_channel_allows_retrieval_only():
         assert decision.rule == "channel.mcp_retrieval_only"
 
 
+def test_the_graph_is_off_mcp_for_every_role():
+    """R23, KTD15: entity management and graph reads stay in the web UI."""
+    for actor in ("owner", "admin", "author"):
+        assert decide(ACTORS[actor], Action.READ_GRAPH).allowed is True
+        agent = replace(ACTORS[actor], channel="mcp")
+        for action in (Action.READ_GRAPH, Action.MANAGE_ENTITIES):
+            assert decide(agent, action).rule == "channel.mcp_retrieval_only"
+    assert decide(ACTORS["admin"], Action.MANAGE_ENTITIES).allowed is True
+    assert decide(ACTORS["author"], Action.MANAGE_ENTITIES).allowed is False
+
+
 def test_admin_retrieves_an_approved_document_shared_with_no_group():
     """Covers AE1."""
     unshared = replace(DOC, shared_group_ids=frozenset(), version_is_serving=True)
