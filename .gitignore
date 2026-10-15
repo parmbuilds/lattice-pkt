@@ -221,3 +221,7 @@ __marimo__/
 
 # Local agent tooling state
 .claude-flow/
+
+# Frontend
+node_modules/
+frontend/dist/

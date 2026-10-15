@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: lattice
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql
+    ports:
+      # Loopback only: this database has a well-known superuser password.
+      - "127.0.0.1:${LATTICE_DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lattice"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Migrations run once as the owner role, so the long-lived app never holds owner credentials (KTD8).
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      LATTICE_MIGRATION_DATABASE_URL: postgresql+psycopg://lattice_owner:lattice_owner_dev@db:5432/lattice
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    environment:
+      LATTICE_DATABASE_URL: postgresql+psycopg://lattice_app:lattice_app_dev@db:5432/lattice
+      # The fallback is the public DEV_PEPPER, so the app refuses it once dev cookies are turned off.
+      LATTICE_SECRET_PEPPER: ${LATTICE_SECRET_PEPPER:-dev-pepper-change-me}
+      LATTICE_PUBLIC_ORIGIN: http://localhost:8000
+      # Local HTTP only; remove behind TLS (KTD13).
+      LATTICE_INSECURE_DEV_COOKIES: "true"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
