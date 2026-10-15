@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 
     search_limit_cap: int = 20
 
+    # Directory of the built UI, served same-origin (KTD12); unset in tests and development.
+    static_dir: str | None = None
+
     @property
     def session_idle(self) -> timedelta:
         return timedelta(minutes=self.session_idle_minutes)

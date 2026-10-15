@@ -3,6 +3,7 @@ import uuid
 import httpx
 import psycopg
 import pytest
+from starlette.routing import Mount
 
 import app.audit as audit_module
 from app.audit import authorize
@@ -25,6 +26,11 @@ def _app_with_probe(settings):
         await authorize(db, subject, Action.MANAGE_GROUPS, detail={"note": note})
         return {"ok": True}
 
+    # Keep the catch-all "/" mount last so the probe route is reachable.
+    mounts = [r for r in app.router.routes if isinstance(r, Mount)]
+    for mount in mounts:
+        app.router.routes.remove(mount)
+        app.router.routes.append(mount)
     return app
 
 
