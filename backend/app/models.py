@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     LargeBinary,
     Text,
     UniqueConstraint,
@@ -186,6 +188,8 @@ class VersionDecision(Base):
     decision: Mapped[str] = mapped_column(Text)
     actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     reason: Mapped[str | None] = mapped_column(Text)
+    # The receipt the approver acknowledged when it raised flags (R9, KTD13).
+    acknowledged_receipt_sha256: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()
     __table_args__ = (
         CheckConstraint(
@@ -288,4 +292,141 @@ class AuditEvent(Base):
         CheckConstraint("channel IN ('ui', 'mcp', 'system')", name="audit_events_channel_check"),
         CheckConstraint("outcome IN ('allow', 'deny')", name="audit_events_outcome_check"),
         Index("audit_events_workspace_time_idx", "workspace_id", "occurred_at"),
+    )
+
+
+def _document_keys(table: str) -> tuple[ForeignKeyConstraint, ForeignKeyConstraint]:
+    """Workspace-scoped references to a document and one of its versions."""
+    return (
+        ForeignKeyConstraint(
+            ["workspace_id", "document_id"],
+            ["documents.workspace_id", "documents.id"],
+            name=f"{table}_document_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["document_id", "version_id"],
+            ["document_versions.document_id", "document_versions.id"],
+            name=f"{table}_version_fkey",
+        ),
+    )
+
+
+class Intake(Base):
+    """Permanent, insert-only record of an upload attempt; holds no file bytes (R4, KTD13)."""
+
+    __tablename__ = "intakes"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    filename: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    detected_type: Mapped[str | None] = mapped_column(Text)
+    parser: Mapped[str | None] = mapped_column(Text)
+    parser_version: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text)
+    receipt: Mapped[dict | None] = mapped_column(JSONB)  # flags and counts only
+    receipt_sha256: Mapped[str | None] = mapped_column(Text)
+    source_sha256: Mapped[str] = mapped_column(Text)
+    document_id: Mapped[uuid.UUID | None]  # null on rejects
+    version_id: Mapped[uuid.UUID | None]
+    created_at: Mapped[datetime] = _created()
+    __table_args__ = (
+        CheckConstraint("outcome IN ('accepted', 'rejected')", name="intakes_outcome_check"),
+        CheckConstraint("length(filename) <= 256", name="intakes_filename_check"),
+        CheckConstraint("length(reason) <= 256", name="intakes_reason_check"),
+        *_document_keys("intakes"),
+    )
+
+
+class IntakePayload(Base):
+    """Purgeable part of an accepted intake: original bytes and hidden excerpts (KTD13)."""
+
+    __tablename__ = "intake_payloads"
+    intake_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("intakes.id"), primary_key=True)
+    workspace_id: Mapped[uuid.UUID]
+    document_id: Mapped[uuid.UUID]
+    version_id: Mapped[uuid.UUID]
+    original: Mapped[bytes] = mapped_column(LargeBinary)
+    hidden_excerpts: Mapped[list] = mapped_column(JSONB)
+    __table_args__ = _document_keys("intake_payloads")
+
+
+class Derivation(Base):
+    """Ledger of one version's chunking and embedding at one pipeline config (KTD3, KTD10)."""
+
+    __tablename__ = "derivations"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID]
+    document_id: Mapped[uuid.UUID]
+    version_id: Mapped[uuid.UUID]
+    config_hash: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    error: Mapped[str | None] = mapped_column(Text)
+    next_attempt_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'ready', 'failed')", name="derivations_status_check"
+        ),
+        UniqueConstraint("version_id", "config_hash", name="derivations_version_config_key"),
+        *_document_keys("derivations"),
+    )
+
+
+class Chunk(Base):
+    """A span of an immutable body plus its embedding; no text is stored (KTD5)."""
+
+    __tablename__ = "chunks"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID]
+    document_id: Mapped[uuid.UUID]
+    version_id: Mapped[uuid.UUID]
+    config_hash: Mapped[str] = mapped_column(Text)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    start: Mapped[int] = mapped_column(Integer)
+    end: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(VECTOR(384))
+    __table_args__ = (
+        *_document_keys("chunks"),
+        ForeignKeyConstraint(
+            ["version_id", "config_hash"],
+            ["derivations.version_id", "derivations.config_hash"],
+            ondelete="CASCADE",
+            name="chunks_derivation_fkey",
+        ),
+        # Exact distance only (KTD6): this index serves the join, not the ranking.
+        Index("chunks_version_config_idx", "version_id", "config_hash"),
+    )
+
+
+class Entity(Base):
+    __tablename__ = "entities"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="entities_workspace_id_id_key"),
+        Index("entities_workspace_name_key", "workspace_id", text("lower(name)"), unique=True),
+    )
+
+
+class EntityAlias(Base):
+    __tablename__ = "entity_aliases"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID]
+    entity_id: Mapped[uuid.UUID]
+    alias: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "entity_id"],
+            ["entities.workspace_id", "entities.id"],
+            ondelete="CASCADE",
+            name="entity_aliases_entity_fkey",
+        ),
+        Index(
+            "entity_aliases_workspace_alias_key", "workspace_id", text("lower(alias)"), unique=True
+        ),
     )

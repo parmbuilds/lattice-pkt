@@ -44,6 +44,12 @@ TENANT_TABLES = (
     "document_grants",
     "invites",
     "access_tokens",
+    "intakes",
+    "intake_payloads",
+    "derivations",
+    "chunks",
+    "entities",
+    "entity_aliases",
 )
 
 
@@ -186,11 +192,11 @@ def _plain(value):
         return str(value)
     if isinstance(value, bytes | memoryview):
         return bytes(value).hex()
-    if isinstance(value, list):
-        return tuple(value)
+    if isinstance(value, list):  # JSON lists may hold dicts, so convert their items too
+        return tuple(_plain(v) for v in value)
     if isinstance(value, dict):
         return repr(sorted(value.items()))
-    return value
+    return value  # a vector column arrives as its text form: plain psycopg has no adapter
 
 
 def snapshot(pg, world: World) -> dict[str, set[tuple]]:

@@ -165,6 +165,96 @@ def test_runtime_role_owns_nothing_and_has_no_destructive_audit_privileges(pg):
     }
 
 
+_VECTOR = "[" + ",".join(["0"] * 383 + ["1"]) + "]"
+
+
+def _derivation(db, workspace_id, doc, version, config_hash="h1") -> None:
+    db.execute(
+        "INSERT INTO derivations (workspace_id, document_id, version_id, config_hash, status) "
+        "VALUES (%s, %s, %s, %s, 'pending')",
+        (workspace_id, doc, version, config_hash),
+    )
+
+
+def _chunk(db, workspace_id, doc, version, config_hash="h1") -> None:
+    db.execute(
+        "INSERT INTO chunks (workspace_id, document_id, version_id, config_hash, ordinal, "
+        "start, \"end\", sha256, embedding) VALUES (%s, %s, %s, %s, 0, 0, 1, 'x', %s)",
+        (workspace_id, doc, version, config_hash, _VECTOR),
+    )
+
+
+def _intake(db, workspace_id, actor_id, filename="a.pdf") -> uuid.UUID:
+    return db.execute(
+        "INSERT INTO intakes (workspace_id, actor_id, filename, reason, detected_type, outcome, "
+        "source_sha256) VALUES (%s, %s, %s, 'encrypted', 'pdf', 'rejected', 'x') RETURNING id",
+        (workspace_id, actor_id, filename),
+    ).fetchone()[0]
+
+
+def test_a_chunk_cannot_reference_a_version_from_another_workspace(db):
+    user = _user(db)
+    ws_a, ws_b = _workspace(db), _workspace(db)
+    _member(db, ws_a, user)
+    _member(db, ws_b, user)
+    doc_b, version_b = _document_with_version(db, ws_b, user)
+    _derivation(db, ws_b, doc_b, version_b)
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        _chunk(db, ws_a, doc_b, version_b)
+
+
+def test_runtime_role_cannot_update_or_delete_intakes(db):
+    ws, user = _workspace(db), _user(db)
+    _member(db, ws, user)
+    _intake(db, ws, user)
+    for statement in ("UPDATE intakes SET reason = 'x'", "DELETE FROM intakes"):
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
+            db.execute(statement)
+
+
+def test_a_version_has_one_derivation_per_config_hash(db):
+    ws, user = _workspace(db), _user(db)
+    _member(db, ws, user)
+    doc, version = _document_with_version(db, ws, user)
+    _derivation(db, ws, doc, version)
+    _derivation(db, ws, doc, version, "h2")
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _derivation(db, ws, doc, version)
+
+
+def test_deleting_a_derivation_deletes_its_chunks(db):
+    ws, user = _workspace(db), _user(db)
+    _member(db, ws, user)
+    doc, version = _document_with_version(db, ws, user)
+    _derivation(db, ws, doc, version)
+    _chunk(db, ws, doc, version)
+    db.execute("DELETE FROM derivations WHERE version_id = %s", (version,))
+    assert db.execute("SELECT count(*) FROM chunks").fetchone()[0] == 0
+
+
+def test_an_intake_filename_is_at_most_256_characters(db):
+    ws, user = _workspace(db), _user(db)
+    _member(db, ws, user)
+    _intake(db, ws, user, "a" * 256)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _intake(db, ws, user, "a" * 257)
+
+
+def test_migration_refuses_a_database_without_the_vector_extension(pg):
+    # KTD2: the superuser installs pgvector; the migration only checks and explains.
+    super_dsn = plain_dsn(pg["superuser"])
+    with psycopg.connect(super_dsn, autocommit=True) as su:
+        su.execute("CREATE DATABASE no_vector OWNER lattice_owner")
+    try:
+        config = Config(str(BACKEND / "alembic.ini"))
+        config.set_main_option("sqlalchemy.url", pg["owner"].rsplit("/", 1)[0] + "/no_vector")
+        with pytest.raises(RuntimeError, match="CREATE EXTENSION vector"):
+            command.upgrade(config, "head")
+    finally:
+        with psycopg.connect(super_dsn, autocommit=True) as su:
+            su.execute("DROP DATABASE no_vector")
+
+
 def test_models_match_the_migrated_schema(pg):
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("sqlalchemy.url", pg["owner"])
