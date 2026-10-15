@@ -17,9 +17,12 @@ log = logging.getLogger("lattice.audit")
 MAX_TEXT = 256  # stored queries and attempted-override values are truncated (Assumptions)
 
 
+NOT_FOUND_DETAIL = "Not found or not permitted."
+
+
 def not_found() -> HTTPException:
     """The one response for anything missing or not permitted (R29)."""
-    return HTTPException(status_code=404, detail="Not found or not permitted.")
+    return HTTPException(status_code=404, detail=NOT_FOUND_DETAIL)
 
 
 def _bounded(value: Any) -> Any:

@@ -46,7 +46,6 @@ class DocumentState:
     shared_group_ids: frozenset[UUID] = frozenset()
     shared_user_ids: frozenset[UUID] = frozenset()
     version_is_serving: bool = False
-    version_is_pending: bool = False
 
 
 class Action(StrEnum):

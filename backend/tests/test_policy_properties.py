@@ -394,7 +394,6 @@ def _state(doc_id, doc, version_id, pending) -> DocumentState:
         shared_group_ids=frozenset(doc["group_grants"]),
         shared_user_ids=frozenset(doc["user_grants"]),
         version_is_serving=version_id == doc["serving"],
-        version_is_pending=version_id == pending,
     )
 
 

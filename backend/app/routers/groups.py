@@ -11,7 +11,7 @@ from app.auth import Member
 from app.db import DB
 from app.models import DocumentGrant, Group, GroupMember, User
 from app.policy import Action, decide
-from app.routers.workspaces import _name
+from app.services.workspaces import validate_name
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/groups", tags=["groups"])
 
@@ -50,7 +50,7 @@ async def list_groups(subject: Member, db: DB) -> dict:
 @router.post("", status_code=201)
 async def create_group(body: GroupName, subject: Member, db: DB) -> dict:
     await authorize(db, subject, Action.MANAGE_GROUPS, detail={"op": "create"})
-    group = Group(workspace_id=subject.workspace_id, name=_name(body.name))
+    group = Group(workspace_id=subject.workspace_id, name=validate_name(body.name))
     try:
         async with db.begin_nested():
             db.add(group)
@@ -67,7 +67,7 @@ async def rename_group(group_id: UUID, body: GroupName, subject: Member, db: DB)
     group = await _group(db, subject, group_id)
     try:
         async with db.begin_nested():
-            group.name = _name(body.name)
+            group.name = validate_name(body.name)
     except IntegrityError:
         raise HTTPException(409, "A group with that name already exists.") from None
     return {"id": str(group.id), "name": group.name}

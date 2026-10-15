@@ -63,7 +63,6 @@ def for_version(doc: Document, state: DocumentState, version_id: UUID | None) ->
     return replace(
         state,
         version_is_serving=version_id is not None and version_id == doc.serving_version_id,
-        version_is_pending=version_id is not None and version_id == doc.pending_version_id,
     )
 
 

@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -40,16 +40,9 @@ class AcceptInvite(BaseModel):
     token: str
 
 
-def _name(value: str) -> str:
-    value = value.strip()
-    if not 1 <= len(value) <= 100:
-        raise HTTPException(400, "Names must be 1 to 100 characters.")
-    return value
-
-
 @router.post("/api/workspaces", status_code=201)
 async def create_workspace(body: NewWorkspace, user: SignedIn, db: DB) -> dict:
-    workspace = Workspace(name=_name(body.name))
+    workspace = Workspace(name=svc.validate_name(body.name))
     db.add(workspace)
     await db.flush()
     db.add(Membership(workspace_id=workspace.id, user_id=user.user_id, role="owner"))
@@ -90,7 +83,7 @@ async def change_role(user_id: UUID, body: RoleChange, subject: Member, db: DB) 
         detail={"target_user_id": str(user_id)},
     )
     # Demotion changes only the role; tokens and groups stay (Assumptions, AE8).
-    await svc.set_role(db, subject.workspace_id, user_id, body.role)
+    await svc.set_role(db, subject.workspace_id, user_id, target.role, body.role)
     return {"user_id": str(user_id), "role": body.role}
 
 
@@ -117,7 +110,9 @@ async def transfer_ownership(body: Transfer, subject: Member, db: DB) -> dict:
         target_role=target.role if target else None,
         detail={"target_user_id": str(body.user_id)},
     )
-    await svc.transfer_ownership(db, subject.workspace_id, subject.user_id, body.user_id)
+    await svc.transfer_ownership(
+        db, subject.workspace_id, subject.user_id, body.user_id, target.role
+    )
     return {"owner_id": str(body.user_id)}
 
 

@@ -125,7 +125,7 @@ def test_admin_retrieves_an_approved_document_shared_with_no_group():
 
 def test_no_role_retrieves_a_draft_but_author_and_managers_can_view_it():
     """Covers AE2."""
-    draft = replace(DOC, has_serving=False, version_is_serving=False, version_is_pending=True)
+    draft = replace(DOC, has_serving=False, version_is_serving=False)
     for name in ("owner", "admin", "author", "other"):
         assert decide(ACTORS[name], Action.RETRIEVE, draft).allowed is False
     views = {name: decide(ACTORS[name], Action.VIEW, draft).allowed for name in ACTORS}
@@ -147,7 +147,7 @@ def test_a_direct_user_grant_gives_read_access_until_removed():
 def test_a_shared_reader_sees_only_the_serving_version():
     reader = subject(OTHER, "member", [GROUP_G])
     serving = replace(DOC, version_is_serving=True)
-    pending = replace(DOC, version_is_pending=True)
+    pending = replace(DOC, version_is_serving=False)
     assert decide(reader, Action.VIEW, serving).allowed is True
     assert decide(reader, Action.VIEW, pending).allowed is False
     withdrawn = replace(serving, withdrawn=True)

@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from sqlalchemy import delete, desc, or_, select, update
+from sqlalchemy import and_, delete, desc, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
@@ -60,8 +60,19 @@ async def list_documents(subject: Member, db: DB) -> dict:
     d = Document.__table__
     sv = DocumentVersion.__table__.alias("sv")
     pv = DocumentVersion.__table__.alias("pv")
+    lv = DocumentVersion.__table__.alias("lv")
+    # A rejected or discarded first draft has neither; show its latest version, as detail does.
+    latest = (
+        select(lv.c.id)
+        .where(lv.c.document_id == d.c.id)
+        .order_by(desc(lv.c.created_at))
+        .limit(1)
+        .scalar_subquery()
+    )
+    fallback = DocumentVersion.__table__.alias("fv")
     serving_visible = read_clause(subject, Action.VIEW, d, sv)
     pending_visible = read_clause(subject, Action.VIEW, d, pv)
+    fallback_visible = read_clause(subject, Action.VIEW, d, fallback)
     rows = await db.execute(
         select(
             d.c.id,
@@ -71,24 +82,41 @@ async def list_documents(subject: Member, db: DB) -> dict:
             sv.c.title,
             pv.c.id,
             pv.c.title,
+            fallback.c.title,
             serving_visible,
             pending_visible,
+            fallback_visible,
             User.display_name,
         )
         .select_from(
             d.outerjoin(sv, sv.c.id == d.c.serving_version_id)
             .outerjoin(pv, pv.c.id == d.c.pending_version_id)
+            .outerjoin(
+                fallback,
+                and_(
+                    d.c.serving_version_id.is_(None),
+                    d.c.pending_version_id.is_(None),
+                    fallback.c.id == latest,
+                ),
+            )
             .join(User, User.id == d.c.author_id)
         )
-        .where(d.c.workspace_id == subject.workspace_id, or_(serving_visible, pending_visible))
+        .where(
+            d.c.workspace_id == subject.workspace_id,
+            or_(serving_visible, pending_visible, fallback_visible),
+        )
         .order_by(desc(d.c.created_at))
     )
     documents = []
-    for doc_id, author_id, withdrawn_at, s_id, s_title, p_id, p_title, s_ok, p_ok, author in rows:
+    for row in rows:
+        doc_id, author_id, withdrawn_at, s_id, s_title, p_id, p_title, f_title = row[:8]
+        s_ok, p_ok, f_ok, author = row[8:]
         documents.append(
             {
                 "id": str(doc_id),
-                "title": (p_title if p_ok else None) or (s_title if s_ok else None),
+                "title": (p_title if p_ok else None)
+                or (s_title if s_ok else None)
+                or (f_title if f_ok else None),
                 "author_id": str(author_id),
                 "author_name": author,
                 "withdrawn": withdrawn_at is not None,
@@ -128,9 +156,9 @@ async def get_document(document_id: UUID, subject: Member, db: DB) -> dict:
     }
     if sees_pending:  # author or manager: history, sharing and the last decision
         result["versions"] = [
-            {"id": str(v.id), "title": v.title, "created_at": v.created_at.isoformat()}
-            for v in await db.scalars(
-                select(DocumentVersion)
+            {"id": str(vid), "title": title, "created_at": created_at.isoformat()}
+            for vid, title, created_at in await db.execute(
+                select(DocumentVersion.id, DocumentVersion.title, DocumentVersion.created_at)
                 .where(DocumentVersion.document_id == doc.id)
                 .order_by(DocumentVersion.created_at)
             )

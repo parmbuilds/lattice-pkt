@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 import { api, errorText, ws } from './api'
 
@@ -37,31 +37,40 @@ export type Loaded<T> = { data?: T; error?: string; loading: boolean; reload: ()
 export function useLoad<T>(path: string | null): Loaded<T> {
   const [count, setCount] = useState(0)
   const key = path === null ? null : `${count}:${path}`
-  // Earlier data stays visible while a reload is in flight; `loading` means the key has no answer yet.
-  const [state, setState] = useState<{ key?: string; data?: T; error?: string }>({})
+  // A reload keeps the path's earlier data visible; a new path (another workspace or query) does not.
+  const [state, setState] = useState<{ key?: string; path?: string; data?: T; error?: string }>({})
   useEffect(() => {
     if (path === null || key === null) return
     let live = true
     api<T>(path).then(
-      (data) => live && setState({ key, data }),
-      (e) => live && setState({ key, error: errorText(e) }),
+      (data) => live && setState({ key, path, data }),
+      (e) => live && setState({ key, path, error: errorText(e) }),
     )
     return () => {
       live = false
     }
   }, [path, key])
   const reload = useCallback(() => setCount((c) => c + 1), [])
-  return { data: state.data, error: state.error, loading: key !== null && state.key !== key, reload }
+  const current = state.path === path
+  return {
+    data: current ? state.data : undefined,
+    error: current ? state.error : undefined,
+    loading: key !== null && state.key !== key,
+    reload,
+  }
 }
 
 // Runs an action and keeps one message for the page's aria-live region.
 export function useAction() {
   const [message, setMessage] = useState('')
+  const busy = useRef(false)
   const run = async (
     action: () => Promise<unknown>,
     done = '',
     refused: (e: unknown) => string = errorText,
   ) => {
+    if (busy.current) return false // a double click must not submit twice
+    busy.current = true
     setMessage('')
     try {
       await action()
@@ -70,6 +79,8 @@ export function useAction() {
     } catch (e) {
       setMessage(refused(e))
       return false
+    } finally {
+      busy.current = false
     }
   }
   return { message, setMessage, run }

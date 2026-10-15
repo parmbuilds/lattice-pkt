@@ -25,7 +25,7 @@ async def create_token(body: NewToken, subject: Member, request: Request, db: DB
     """Shown once; bound to one workspace; requires re-entering the password (KTD5, KTD7)."""
     await authorize(db, subject, Action.MANAGE_OWN_TOKENS, detail={"op": "create"})
     user = await db.get(User, subject.user_id)
-    if not security.check_password(body.password, user.password_hash):
+    if not await security.check_password(body.password, user.password_hash):
         raise HTTPException(403, "Re-enter your password to create a token.")
     name = body.name.strip()
     if not 1 <= len(name) <= 100:

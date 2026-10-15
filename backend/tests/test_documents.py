@@ -252,6 +252,8 @@ async def test_concurrent_lifecycle_changes_end_in_one_consistent_state(settings
             )
             assert first.status_code in (200, 404, 409), name
             assert second.status_code in (200, 204, 404, 409), name
+            # 404 is a valid loss (approving a just-withdrawn document); someone must win.
+            assert first.is_success or second.is_success, name
             with psycopg.connect(plain_dsn(pg["app"])) as conn:
                 decisions = conn.execute(
                     "SELECT count(*) FROM version_decisions WHERE version_id = %s",
@@ -263,3 +265,28 @@ async def test_concurrent_lifecycle_changes_end_in_one_consistent_state(settings
             assert decisions <= 1, name
             if first.status_code == 200:
                 assert str(serving) == doc["pending_version_id"], name
+
+
+async def test_a_rejected_first_draft_stays_listed_for_its_author_and_managers(settings):
+    async with (
+        signed_in(settings) as owner,
+        signed_in(settings) as author,
+        signed_in(settings) as other,
+    ):
+        ws = await create_workspace(owner)
+        await join(owner, ws, author)
+        await join(owner, ws, other)
+        doc = await add_document(author, ws, title="Rejected first draft")
+        rejected = await owner.post(
+            _docs_url(ws, doc["id"], "/reject"),
+            json={"version_id": doc["pending_version_id"], "reason": "Needs detail"},
+        )
+        assert rejected.is_success
+
+        async def listed(client) -> dict[str, str | None]:
+            docs = (await client.get(f"/api/workspaces/{ws}/documents")).json()["documents"]
+            return {d["id"]: d["title"] for d in docs}
+
+        assert (await listed(author))[doc["id"]] == "Rejected first draft"
+        assert (await listed(owner))[doc["id"]] == "Rejected first draft"
+        assert doc["id"] not in await listed(other)

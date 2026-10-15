@@ -33,9 +33,6 @@ def _created() -> Mapped[datetime]:
     return mapped_column(server_default=func.now())
 
 
-ROLES = ("owner", "admin", "member")
-
-
 class User(Base):
     __tablename__ = "users"
     id: Mapped[uuid.UUID] = _id()

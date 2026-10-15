@@ -290,3 +290,54 @@ async def test_the_owners_own_role_cannot_be_changed_directly(settings):
         )
         assert response.status_code == 404  # ownership moves only by transfer (R8)
         assert (await _roles(owner, ws))[owner.user_id] == "owner"
+
+
+async def test_a_role_change_authorized_before_a_transfer_cannot_demote_the_new_owner(settings, pg):
+    from uuid import UUID
+
+    import pytest
+    from fastapi import HTTPException
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.db import make_sessionmaker
+    from app.services.workspaces import set_role
+
+    async with signed_in(settings) as owner, signed_in(settings) as admin:
+        ws = await create_workspace(owner)
+        await join(owner, ws, admin, "admin")
+        transfer = await owner.post(
+            f"/api/workspaces/{ws}/transfer", json={"user_id": admin.user_id}
+        )
+        assert transfer.status_code == 200
+        # The interleaving the race produces: a demotion authorized while the target was an admin.
+        engine = create_async_engine(pg["app"])
+        try:
+            async with make_sessionmaker(engine)() as db, db.begin():
+                with pytest.raises(HTTPException) as conflict:
+                    await set_role(db, UUID(ws), UUID(admin.user_id), "admin", "member")
+            assert conflict.value.status_code == 409
+        finally:
+            await engine.dispose()
+        assert list((await _roles(owner, ws)).values()).count("owner") == 1
+
+
+async def test_concurrent_role_change_and_transfer_leave_exactly_one_owner(settings):
+    async with signed_in(settings) as owner, signed_in(settings) as admin:
+        ws = await create_workspace(owner)
+        await join(owner, ws, admin, "admin")
+        await asyncio.gather(
+            owner.patch(f"/api/workspaces/{ws}/members/{admin.user_id}", json={"role": "member"}),
+            owner.post(f"/api/workspaces/{ws}/transfer", json={"user_id": admin.user_id}),
+        )
+        assert list((await _roles(owner, ws)).values()).count("owner") == 1
+
+
+async def test_names_are_trimmed_and_must_be_1_to_100_characters(settings):
+    async with signed_in(settings) as owner:
+        for bad in ("", "   ", "x" * 101):
+            assert (await owner.post("/api/workspaces", json={"name": bad})).status_code == 400
+        ws = await create_workspace(owner, name="  Acme  ")
+        groups = f"/api/workspaces/{ws}/groups"
+        assert (await owner.post(groups, json={"name": "x" * 101})).status_code == 400
+        group = await owner.post(groups, json={"name": " Platform "})
+        assert group.json()["name"] == "Platform"

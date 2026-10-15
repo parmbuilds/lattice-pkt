@@ -1,5 +1,6 @@
 """Secrets (KTD7): high-entropy values stored only as HMAC verifiers; passwords use Argon2id."""
 
+import asyncio
 import hashlib
 import hmac
 import secrets
@@ -42,12 +43,13 @@ def matches(value: str, stored: bytes, pepper: str) -> bool:
     return hmac.compare_digest(verifier(value, pepper), stored)
 
 
-def hash_password(password: str) -> str:
-    return _passwords.hash(password)
+# Argon2 is deliberately slow; run it in a thread so one sign-in does not stall the event loop.
+async def hash_password(password: str) -> str:
+    return await asyncio.to_thread(_passwords.hash, password)
 
 
-def check_password(password: str, password_hash: str | None) -> bool:
+async def check_password(password: str, password_hash: str | None) -> bool:
     if password_hash is None:
-        _passwords.verify(password, _DUMMY_HASH)
+        await asyncio.to_thread(_passwords.verify, password, _DUMMY_HASH)
         return False
-    return _passwords.verify(password, password_hash)
+    return await asyncio.to_thread(_passwords.verify, password, password_hash)

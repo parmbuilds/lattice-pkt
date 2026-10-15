@@ -48,7 +48,7 @@ async def sign_up(body: SignUp, db: DB) -> dict:
             user = User(
                 email=email,
                 display_name=body.name.strip(),
-                password_hash=security.hash_password(body.password),
+                password_hash=await security.hash_password(body.password),
             )
             db.add(user)
     except IntegrityError:
@@ -62,7 +62,7 @@ async def sign_up(body: SignUp, db: DB) -> dict:
 async def sign_in(body: SignIn, request: Request, response: Response, db: DB) -> dict:
     settings = request.app.state.settings
     user = await db.scalar(select(User).where(func.lower(User.email) == body.email.lower()))
-    if not security.check_password(body.password, user.password_hash if user else None):
+    if not await security.check_password(body.password, user.password_hash if user else None):
         log.info("sign-in refused")
         raise SIGNIN_REJECTED
     issued = security.issue("ses", settings.secret_pepper)

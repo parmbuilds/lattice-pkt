@@ -107,10 +107,8 @@ async def approve(client: httpx.AsyncClient, workspace_id: str, document: dict) 
     response.raise_for_status()
 
 
-async def retrievable_ids(pg, workspace_id: str, user_id: str) -> set[str]:
+async def retrievable_ids(pg, workspace_id: str, uid: str) -> set[str]:
     """What the policy's retrieve predicate returns for a user right now (live role and groups)."""
-    import uuid
-
     from sqlalchemy.ext.asyncio import create_async_engine
 
     from app.auth import load_subject
@@ -120,7 +118,7 @@ async def retrievable_ids(pg, workspace_id: str, user_id: str) -> set[str]:
     engine = create_async_engine(pg["app"])
     try:
         async with make_sessionmaker(engine)() as db:
-            subject = await load_subject(db, uuid.UUID(user_id), uuid.UUID(workspace_id))
+            subject = await load_subject(db, uuid.UUID(uid), uuid.UUID(workspace_id))
             return {str(v) for v in await db.scalars(readable_versions(subject, Action.RETRIEVE))}
     finally:
         await engine.dispose()

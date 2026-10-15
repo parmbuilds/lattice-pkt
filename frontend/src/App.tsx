@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BrowserRouter, Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router'
-import { api, NOT_FOUND, setCsrfToken } from './api'
+import { api, ApiError, NOT_FOUND, setCsrfToken } from './api'
 import Approvals from './pages/Approvals'
 import Audit from './pages/Audit'
 import DocumentDetail from './pages/DocumentDetail'
@@ -32,9 +32,12 @@ function Shell() {
           setCsrfToken(fresh.csrf_token)
           setMe(fresh)
         },
-        () => {
-          setCsrfToken('')
-          setMe(null)
+        (e) => {
+          // Only a 401 means signed out; a transient failure keeps the page that is showing.
+          if (e instanceof ApiError && e.status === 401) {
+            setCsrfToken('')
+            setMe(null)
+          } else setMe((prev) => (prev === undefined ? null : prev))
         },
       ),
     [],
