@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: Document upload, ingestion and RAG / GraphRAG readiness</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+  :root {
+    --ink: #121417; --graphite: #474e4b; --muted: #616a66;
+    --rule: #d5dad7; --rule-strong: #a3aca8;
+    --film: #eef1ef; --sheet: #fcfdfc;
+    --blue: #2b5fae; --blue-tint: #e4ecf8;
+    --red-ink: #a92d1f; --red-tint: #fbebe8;
+    --ok: #1d6a48; --ok-tint: #e2f0e8;
+    --draft: #845600; --draft-tint: #fbf0d8;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--film); color: var(--ink); font: 15px/1.6 var(--sans); }
+  main { max-width: 920px; margin-inline: auto; padding: 2.5rem 1.25rem 3rem; }
+  p, li, dd { max-width: 72ch; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin: 0.25rem 0 0.75rem; font-weight: 600; }
+  h2 { font-size: 1.25rem; margin: 2.5rem 0 0.75rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--rule-strong); font-weight: 600; }
+  h3 { font-size: 1.0625rem; margin: 0 0 0.5rem; font-weight: 600; }
+  h4 { font-family: var(--cond); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--graphite); margin: 1rem 0 0.3rem; }
+  strong { color: inherit; }
+  code { font-family: var(--mono); font-size: 0.8125rem; background: var(--film); padding: 0 0.25em; border-radius: 2px; }
+  a { color: var(--blue); }
+  .eyebrow { font-family: var(--cond); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--graphite); }
+  .titleblock { background: var(--sheet); border: 1px solid var(--ink); padding: 1.25rem 1.5rem; }
+  .meta { display: grid; grid-template-columns: repeat(4, auto); gap: 0.25rem 1.5rem; margin: 0.75rem 0 0; border-top: 1px solid var(--rule); padding-top: 0.75rem; }
+  .meta dt { font-family: var(--cond); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .meta dd { margin: 0; font-size: 0.875rem; }
+  .stats { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 0; }
+  .stat { background: var(--film); border: 1px solid var(--rule); border-radius: 3px; padding: 0.3rem 0.65rem; font-size: 0.8125rem; }
+  .stat b { font-variant-numeric: tabular-nums; }
+  section > p { margin: 0.5rem 0; }
+  .sheet { background: var(--sheet); border: 1px solid var(--rule); padding: 1rem 1.25rem; }
+  .sheet ul { margin: 0.25rem 0; padding-left: 1.2rem; }
+  .sheet li { margin: 0.2rem 0; }
+  ol.axes { background: var(--sheet); border: 1px solid var(--rule); padding: 0.9rem 1.25rem 0.9rem 2.5rem; margin: 0; }
+  ol.axes li { margin: 0.2rem 0; }
+  nav.jump { background: var(--sheet); border: 1px solid var(--rule); padding: 0.75rem 1.25rem; margin-bottom: 1rem; }
+  nav.jump ol { margin: 0; padding-left: 1.4rem; columns: 2; column-gap: 2rem; }
+  nav.jump li { font-size: 0.875rem; margin: 0.15rem 0; break-inside: avoid; }
+  article.idea { background: var(--sheet); border: 1px solid var(--rule-strong); padding: 1.25rem 1.5rem; margin: 0 0 1.25rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0.75rem; }
+  .chip { font-family: var(--cond); font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid var(--rule-strong); border-radius: 3px; padding: 0.1rem 0.5rem; background: var(--film); color: var(--graphite); }
+  .chip.id { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+  .chip.high { background: var(--ok-tint); color: var(--ok); border-color: var(--ok-tint); }
+  .chip.med { background: var(--draft-tint); color: var(--draft); border-color: var(--draft-tint); }
+  .basis li { margin: 0.3rem 0; }
+  .tag { font-family: var(--mono); font-size: 0.75rem; font-weight: 500; color: var(--blue); }
+  figure { margin: 1rem 0; background: #fff; border: 1px solid var(--rule); padding: 0.75rem; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { font-size: 0.8125rem; color: var(--graphite); margin-top: 0.4rem; }
+  svg text { font-family: var(--sans); fill: var(--ink); }
+  svg .lbl { font-size: 12px; }
+  svg .sm { font-size: 11px; fill: var(--graphite); }
+  svg .mono { font-family: var(--mono); font-size: 12px; }
+  svg .cap { font-family: var(--cond); font-size: 11px; letter-spacing: 0.06em; fill: var(--graphite); }
+  .callout { background: var(--blue-tint); border: 1px solid var(--blue-tint); padding: 0.75rem 1rem; margin: 0.75rem 0; }
+  .callout .eyebrow { color: var(--blue); }
+  table { width: 100%; border-collapse: collapse; background: var(--sheet); border: 1px solid var(--rule); font-size: 0.875rem; }
+  th, td { text-align: left; vertical-align: top; padding: 0.45rem 0.65rem; border-bottom: 1px solid var(--rule); }
+  th { font-family: var(--cond); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--graphite); background: var(--film); }
+  td:first-child { font-family: var(--mono); font-size: 0.8125rem; white-space: nowrap; }
+  footer.composition-signal { margin-top: 2.5rem; padding-top: 0.75rem; border-top: 1px solid var(--rule-strong); font-size: 0.8125rem; color: var(--muted); }
+  @media (max-width: 640px) { .meta { grid-template-columns: repeat(2, auto); } nav.jump ol { columns: 1; } }
+</style>
+</head>
+<body>
+<main>
+
+<header class="titleblock">
+  <div class="eyebrow">Ideation · Lattice</div>
+  <h1>Ideation: Document upload, ingestion and RAG / GraphRAG readiness</h1>
+  <p>Which directions are worth exploring for letting people upload files, ingesting them through a pipeline, and making the result retrievable by vector RAG and GraphRAG, without weakening the governance promises Lattice already keeps.</p>
+  <dl class="meta">
+    <div><dt>Date</dt><dd><time datetime="2026-10-15">2026-10-15</time></dd></div>
+    <div><dt>Topic</dt><dd><code>document-ingestion-rag</code></dd></div>
+    <div><dt>Mode</dt><dd>repo-grounded</dd></div>
+    <div><dt>Focus</dt><dd>upload of many file types, ingestion pipeline, RAG + GraphRAG readiness</dd></div>
+  </dl>
+  <div class="stats">
+    <span class="stat"><b>37</b> raw ideas from 6 frames</span>
+    <span class="stat"><b>20</b> after merge + cross-cutting</span>
+    <span class="stat"><b>7</b> survivors</span>
+    <span class="stat"><b>5 / 5</b> axes covered</span>
+  </div>
+</header>
+
+<section id="grounding-context">
+  <h2>Grounding Context</h2>
+  <div class="eyebrow">Codebase Context</div>
+  <div class="sheet">
+    <ul>
+      <li><strong>Content is one immutable row per version.</strong> <code>DocumentVersion</code> holds <code>title</code> and <code>body</code> as text, plus a generated, weighted <code>search_vector</code> tsvector with a GIN index (<code>backend/app/models.py:148-176</code>). A trigger rejects every UPDATE and DELETE (KTD4). <code>MAX_BODY = 200_000</code> characters and <code>validate()</code> are the only content gate (<code>services/documents.py:17-29</code>).</li>
+      <li><strong>There is no file concept.</strong> <code>POST /api/documents</code> takes JSON <code>title</code> + <code>body</code> (<code>routers/documents.py:46-53</code>). It runs <code>validate()</code> before <code>authorize()</code>. There is no multipart route, parser, MIME check, processing status or chunk table. No embedding client is in <code>pyproject.toml</code>.</li>
+      <li><strong>Lifecycle via pointers.</strong> <code>Document.serving_version_id</code>, <code>pending_version_id</code> and <code>withdrawn_at</code> drive the lifecycle. Approval is one conditional pointer flip that raises <code>STALE_DRAFT</code> (<code>services/documents.py:103-125</code>). <code>withdraw()</code> touches nothing derived, because today the only derivative is a generated column in the same row.</li>
+      <li><strong>Retrieval is one SQL statement.</strong> <code>read_clause(subject, RETRIEVE, d, v)</code> runs in the <code>WHERE</code> before <code>ORDER BY ts_rank … LIMIT</code> (<code>services/search.py:24-31</code>). README:55 says: “Search cannot fetch the ten best matches and then drop the ones you may not read.” Policy is one module (<code>policy.py</code>), proved against an independent reference model by a Hypothesis state machine (<code>tests/test_policy_properties.py</code>).</li>
+      <li><strong>Closed MCP surface.</strong> <code>DECLARED = {"search_knowledge", "get_evidence"}</code> is guard-tested (<code>mcp_server.py:42</code>). Audit stores returned <em>version</em> ids only (<code>mcp_server.py:173-175</code>). Audit writes are in-transaction and fail closed.</li>
+      <li><strong>Infrastructure.</strong> <code>compose.yaml</code> runs only <code>db</code> (stock <code>postgres:18</code>, no pgvector), <code>migrate</code> and <code>app</code>. There is no worker, queue or scheduler. Tests use testcontainers Postgres 18, and a guard fails any new route without grounded coverage.</li>
+      <li><strong>Product boundary.</strong> <code>PRODUCT.md:50</code> says: “Not built, do not show or imply: vector or hybrid retrieval, file ingestion, citations …”. Shipping any of this changes PRODUCT.md and README's deferred table (<code>README.md:87</code>).</li>
+    </ul>
+  </div>
+  <h4>Additional context</h4>
+  <p><code>governed-knowledge-store-thoughts.md</code> is the original proposal: approved knowledge served to agents over MCP with permissions, citations, audit and withdrawal; FastAPI + Postgres/pgvector + LlamaIndex. It scopes v1 file types to Markdown and text-PDF (~line 66), leaves the embedding provider undecided (~110), and treats “a bounded knowledge graph” as a stretch goal (lines 112-124).</p>
+  <h4>Past learnings</h4>
+  <p>None. The repo has no <code>docs/solutions/</code> store yet.</p>
+  <h4>External context</h4>
+  <div class="sheet">
+    <ul>
+      <li>pgvector applies <code>WHERE</code> <em>after</em> the approximate HNSW scan, so a selective ACL returns too few rows. v0.8 iterative scans trade latency for recall. (<a href="https://github.com/pgvector/pgvector">pgvector docs</a>)</li>
+      <li>Glean treats ACLs as both an index-time and a query-time concern, and warns that “allow all for now” forces a reindex later. (<a href="https://developers.glean.com/libraries/indexing-sdk/permissions">Glean permissions SDK</a>)</li>
+      <li>Microsoft GraphRAG keeps <code>text_unit_ids</code> lineage, but its entity descriptions and community reports are LLM-written prose. LightRAG supports incremental insert and delete. Graphiti stores temporal facts with provenance. Apache AGE runs Cypher inside Postgres. (<a href="https://microsoft.github.io/graphrag/index/outputs/">GraphRAG outputs</a>, <a href="https://age.apache.org/overview/">Apache AGE</a>)</li>
+      <li>Parsers convert broadly and guarantee nothing. LlamaParse continues past OCR errors with empty text by default. Unstructured extracts PDF tables only in <code>hi_res</code> mode. Docling has documented OOM and garbled-font failures. (<a href="https://docling.org/troubleshooting/">Docling troubleshooting</a>, <a href="https://unstructured.readthedocs.io/en/latest/best_practices/table_extraction_pdf.html">Unstructured tables</a>)</li>
+      <li>Anthropic's contextual retrieval adds 50-100 generated tokens of context to each chunk before embedding and BM25. Parent-child retrieval searches small spans and returns a coherent parent. (<a href="https://www.anthropic.com/engineering/contextual-retrieval">Contextual Retrieval</a>)</li>
+      <li>The OWASP RAG cheat sheet calls for cascading deletion to chunks, embeddings, indexes and caches, with orphan scans and deletion logs. It also warns about indirect prompt injection through hidden text. The OWASP File Upload cheat sheet calls for allowlists, signature checks, size and decompression limits, and isolated processing. (<a href="https://cheatsheetseries.owasp.org/cheatsheets/RAG_Security_Cheat_Sheet.html">RAG Security</a>, <a href="https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html">File Upload</a>)</li>
+      <li>Ragas evaluates retrieval and answers. It does not measure parse fidelity or citation correctness. (<a href="https://docs.ragas.io/en/stable/references/evaluate/">Ragas</a>)</li>
+    </ul>
+  </div>
+</section>
+
+<section id="topic-axes">
+  <h2>Topic Axes</h2>
+  <ol class="axes">
+    <li><strong>Upload &amp; intake</strong>: file types, file safety, the quarantine/draft state, size limits</li>
+    <li><strong>Extraction fidelity &amp; review</strong>: what the parser produced, and what the approver sees and signs</li>
+    <li><strong>Derived-index lifecycle</strong>: chunks, embeddings and graph rows keyed to versions; freshness; withdrawal propagation</li>
+    <li><strong>Permission-safe retrieval</strong>: vector, hybrid and graph retrieval through <code>read_clause</code>; MCP tools; citations</li>
+    <li><strong>Graph knowledge</strong>: entities and relations across documents (GraphRAG)</li>
+  </ol>
+</section>
+
+<section id="ranked-ideas">
+  <h2>Ranked Ideas</h2>
+  <div class="callout">
+    <div class="eyebrow">The thread through the set</div>
+    <p>Most ideas share one rule. Every derived artifact (chunk, vector, edge, report) is a row keyed to an immutable version and readable only through the existing <code>read_clause</code>. Ingestion then extends Lattice's governance instead of sitting beside it. Ideas 3, 5 and 6 are three faces of that rule.</p>
+  </div>
+  <nav class="jump" aria-label="Ranked ideas">
+    <ol>
+      <li><a href="#i1">I1. Upload is a narrow waist into the existing draft path</a></li>
+      <li><a href="#i2">I2. Fail-closed extraction receipt</a></li>
+      <li><a href="#i3">I3. Chunks are spans of the approved body</a></li>
+      <li><a href="#i4">I4. Policy-first vector retrieval, born under the property test</a></li>
+      <li><a href="#i5">I5. One derivations ledger: readiness, pipeline version, withdrawal</a></li>
+      <li><a href="#i6">I6. Governed graph: edges inherit evidence readability</a></li>
+      <li><a href="#i7">I7. Fidelity-and-permission benchmark on the Acme seed</a></li>
+    </ol>
+  </nav>
+
+  <article class="idea" id="i1">
+    <div class="chips"><span class="chip id">I1</span><span class="chip">Upload &amp; intake</span><span class="chip high">Confidence 85%</span><span class="chip">Complexity Medium</span></div>
+    <h3>I1. Upload is a narrow waist into the existing draft path</h3>
+    <h4>Description</h4>
+    <p>Each file type is an adapter whose only output is <code>(title, body)</code>. That output enters through the existing <code>validate()</code> → <code>new_draft()</code> path, so an uploaded PDF becomes an ordinary unshared draft in the Approvals queue, reviewed with the existing diff. The original bytes are stored once, content-addressed by sha256. They sit on an intake record with the detected type (by file signature, not MIME), parser id and version, and an outcome: drafted, or rejected with a reason. They are an attachment of the version, never the retrieval unit. Authorization moves <em>before</em> parsing. Re-uploading a file with the same hash is a no-op, and a matching title offers “add as a new version” rather than creating a duplicate document.</p>
+    <figure>
+      <svg viewBox="0 0 760 175" role="img" aria-label="Many file types flow through one adapter into the existing validate, new_draft and approval path">
+        <g fill="#eef1ef" stroke="#a3aca8">
+          <rect x="10" y="20" width="90" height="26" rx="2"/><rect x="10" y="60" width="90" height="26" rx="2"/>
+          <rect x="10" y="100" width="90" height="26" rx="2"/><rect x="10" y="140" width="90" height="26" rx="2"/>
+        </g>
+        <text class="lbl" x="55" y="37" text-anchor="middle">PDF</text>
+        <text class="lbl" x="55" y="77" text-anchor="middle">DOCX</text>
+        <text class="lbl" x="55" y="117" text-anchor="middle">Markdown</text>
+        <text class="lbl" x="55" y="157" text-anchor="middle">HTML</text>
+        <g stroke="#616a66" fill="none">
+          <path d="M100 33 L150 80"/><path d="M100 73 L150 86"/><path d="M100 113 L150 94"/><path d="M100 153 L150 100"/>
+        </g>
+        <rect x="150" y="62" width="150" height="56" fill="#e4ecf8" stroke="#2b5fae"/>
+        <text class="lbl" x="225" y="86" text-anchor="middle">Adapter</text>
+        <text class="mono" x="225" y="104" text-anchor="middle">→ (title, body)</text>
+        <rect x="335" y="62" width="130" height="56" fill="#fcfdfc" stroke="#121417"/>
+        <text class="lbl" x="400" y="86" text-anchor="middle">authorize</text>
+        <text class="mono" x="400" y="104" text-anchor="middle">validate()</text>
+        <rect x="500" y="62" width="110" height="56" fill="#fcfdfc" stroke="#121417"/>
+        <text class="mono" x="555" y="95" text-anchor="middle">new_draft()</text>
+        <rect x="645" y="62" width="105" height="56" fill="#fbf0d8" stroke="#845600" stroke-dasharray="4 3"/>
+        <text class="lbl" x="697" y="86" text-anchor="middle">Approvals</text>
+        <text class="lbl" x="697" y="104" text-anchor="middle">queue</text>
+        <g stroke="#121417" fill="none"><path d="M300 90 H335"/><path d="M465 90 H500"/><path d="M610 90 H645"/></g>
+        <text class="cap" x="335" y="150">EXISTING PATH, UNCHANGED</text>
+        <path d="M335 138 H750" stroke="#a3aca8" stroke-dasharray="2 3"/>
+      </svg>
+      <figcaption>New code is only the adapters on the left. Everything from <code>validate()</code> onward already exists and is already tested.</figcaption>
+    </figure>
+    <h4>Basis</h4>
+    <ul class="basis">
+      <li><span class="tag">direct:</span> <code>title, text = svc.validate(body.title, body.body)</code> then <code>await authorize(...)</code> then <code>new_draft(...)</code> (<code>routers/documents.py:47-52</code>). This is the one version-creation path, and its validate-then-authorize order is wrong once a parser sits in front.</li>
+      <li><span class="tag">direct:</span> “Every agent-visible field lives on the version, so nothing reaches retrieval unreviewed” (plan KTD4, line 287). <code>DocumentVersion</code> has no source or provenance fields (<code>models.py:151-157</code>).</li>
+      <li><span class="tag">direct:</span> the seed's pending edit pattern, “v1 keeps serving until v2 is approved” (<code>seed.py:177-186</code>), is what re-uploads should reuse.</li>
+      <li><span class="tag">external:</span> the OWASP File Upload cheat sheet: allowlist, signature checks, generated names, size and decompression limits, isolated processing.</li>
+    </ul>
+    <h4>Rationale</h4>
+    <p>Each new format costs one adapter, not a second lifecycle. Approval, unshared-by-default, audit, withdrawal and the review UI apply to files without new code. Keeping the source hash and parser version on the version makes “approval binds to one exact immutable version” cover <em>what was read from which file</em>, and lets a better parser later re-extract from the sealed original.</p>
+    <h4>Downsides</h4>
+    <p>The 200k-character cap rejects roughly 60+ page PDFs, so the cap becomes a deliberate product decision. A synchronous parse inside the request is fine for Markdown and text-PDF but not for large or OCR'd files, which pushes toward I5's job table. Re-extraction drafts need a system actor, since <code>created_by</code> is a non-null user FK, and a rule for not clobbering a human's pending draft. Zip and folder intake was left out deliberately because it adds decompression-bomb surface.</p>
+  </article>
+
+  <article class="idea" id="i2">
+    <div class="chips"><span class="chip id">I2</span><span class="chip">Extraction fidelity &amp; review</span><span class="chip high">Confidence 80%</span><span class="chip">Complexity Medium</span></div>
+    <h3>I2. Fail-closed extraction receipt</h3>
+    <h4>Description</h4>
+    <p>Every parse writes a receipt keyed to the draft. It records the parser and its config, per-page character counts, and flags for empty or failed-OCR pages, dropped tables, skipped images, and <em>hidden-layer</em> content (white-on-white or off-page text, comments, tracked changes, hidden sheets, alt text). Hidden-layer content is excluded from the body by default and shown in a labelled section of the review card. Any flag disables Approve until the approver acknowledges that flag, and the acknowledgement is stored with the decision. “Parsed with problems” becomes a visible state, not a green tick. As an option for scanned or untrusted sources, a second independent reading (rendered-page OCR against the text layer) can point the reviewer at the spans where the two readings disagree.</p>
+    <h4>Basis</h4>
+    <ul class="basis">
+      <li><span class="tag">direct:</span> <code>escape_invisible</code> escapes only <code>unicodedata.category(c) == "Cf"</code> (<code>services/documents.py:150-153</code>). The plan admits that characters which “render invisibly even in raw text … can still pass review, a known v1 limitation” (plan line 260).</li>
+      <li><span class="tag">direct:</span> <code>mcp_server.py</code>'s <code>DATA_NOTE</code> tells agents “Every item was approved by a workspace admin or owner.”</li>
+      <li><span class="tag">external:</span> LlamaParse continues after OCR errors with empty text unless told to fail. Unstructured extracts tables only in <code>hi_res</code>. Docling can garble fonts. OWASP lists hidden-text prompt injection.</li>
+    </ul>
+    <h4>Rationale</h4>
+    <p>Today the human typed the body the reviewer reads. Once a parser sits between file and body, the reviewer approves the parser's output without seeing what it dropped or what the file was hiding. The <code>review_diff</code> shows what text was produced, but never what is <em>missing</em>, which is the dominant parser failure. This is the point where “approved by an admin” either stays true or quietly becomes false.</p>
+    <h4>Downsides</h4>
+    <p>Hidden-layer and per-page confidence signals depend on parser APIs that have not been verified, and they vary by parser. <code>VersionDecision.reason</code> is optional and capped at 500 characters, so a mandatory acknowledgement needs a schema or service change. The dual-reading option adds native OCR dependencies to a slim image, and its divergence output may be noisy (columns, ligatures), so it stays optional.</p>
+  </article>
+
+  <article class="idea" id="i3">
+    <div class="chips"><span class="chip id">I3</span><span class="chip">Permission-safe retrieval</span><span class="chip high">Confidence 85%</span><span class="chip">Complexity Medium</span></div>
+    <h3>I3. Chunks are spans of the approved body; citations become checkable</h3>
+    <h4>Description</h4>
+    <p>A chunk stores no text of its own. It is <code>(version_id, start, end, sha256)</code> into the immutable approved body, plus its embedding. A derivation-time assert fails the run if any chunk does not equal <code>body[start:end]</code>. <code>search_knowledge</code> returns span references, <code>get_evidence</code> accepts a span and returns exactly that passage, and the audit row records spans, not just versions. Contextual-retrieval prefixes and summaries may be embedded and indexed, but they are stored separately and never returned as evidence. A citation an agent quotes back can be re-sliced and compared character for character. It can also report “that version has since been withdrawn”.</p>
+    <figure>
+      <svg viewBox="0 0 760 160" role="img" aria-label="Three highlighted spans laid over one immutable version body; a citation is the span tuple">
+        <text class="cap" x="20" y="28">DOCUMENTVERSION.BODY · V7 · APPROVED · IMMUTABLE</text>
+        <rect x="20" y="40" width="720" height="40" fill="#fcfdfc" stroke="#121417"/>
+        <g fill="#e4ecf8" stroke="#2b5fae">
+          <rect x="80" y="44" width="140" height="32"/><rect x="260" y="44" width="160" height="32"/><rect x="470" y="44" width="170" height="32"/>
+        </g>
+        <text class="mono" x="150" y="105" text-anchor="middle">1180–2410</text>
+        <text class="mono" x="340" y="105" text-anchor="middle">2650–4120</text>
+        <text class="mono" x="555" y="105" text-anchor="middle">4400–6010</text>
+        <text class="sm" x="20" y="140">Citation = (version_id, start, end, sha256). Anyone can re-slice the approved text and compare; no copied chunk text exists to drift.</text>
+      </svg>
+      <figcaption>Spans are offsets into text a human approved, so the evidence an agent receives can always be traced to approved characters.</figcaption>
+    </figure>
+    <h4>Basis</h4>
+    <ul class="basis">
+      <li><span class="tag">direct:</span> “Immutable: a trigger rejects every UPDATE and DELETE (KTD4).” (<code>models.py:149</code>). Offsets into an immutable body can never go stale.</li>
+      <li><span class="tag">direct:</span> audit records <code>returned_version_ids=returned_ids(results)</code> (<code>mcp_server.py:173-175</code>), at version granularity only. README:73 promises that “the audit trail records what each agent received”.</li>
+      <li><span class="tag">direct:</span> citations are listed as “Not built” (<code>PRODUCT.md:50</code>). The proposal wants “exact supporting passages” (<code>governed-knowledge-store-thoughts.md:68</code>).</li>
+      <li><span class="tag">external:</span> Anthropic contextual retrieval and parent-child retrieval show context helps ranking. Keeping that context separate from the returned span stops LLM annotations and parser side-text from reaching agents as “approved” evidence.</li>
+    </ul>
+    <h4>Rationale</h4>
+    <p>Immutability makes this citation guarantee unusually cheap and strong. The span is also the shared key that chunks, graph edges (I6), withdrawal purge (I5) and the benchmark (I7) all reuse, so this one decision makes the rest of the set simpler. It extends KTD4 (“nothing reaches retrieval unreviewed”) from documents to passages.</p>
+    <h4>Downsides</h4>
+    <p>A new parameter on <code>get_evidence</code> or <code>search_knowledge</code> changes the guard-tested <code>DECLARED</code> set (<code>mcp_server.py:42</code>) and the endpoint matrix. Offset spans need a canonical body encoding (normalise on ingest, count in code points) or they break subtly. “Nobody else can claim this” overstates it, since offset citations exist elsewhere. What is distinctive is pairing them with exact-version approval.</p>
+  </article>
+
+  <article class="idea" id="i4">
+    <div class="chips"><span class="chip id">I4</span><span class="chip">Permission-safe retrieval</span><span class="chip high">Confidence 75%</span><span class="chip">Complexity High</span></div>
+    <h3>I4. Policy-first vector retrieval, born under the property test</h3>
+    <h4>Description</h4>
+    <p>Vector search keeps the exact <code>read_clause</code> predicate as the security boundary, applied <em>before</em> ranking, the same shape as today's full-text search. Start with exact distance over the permitted set, which has perfect recall and no leak. Add HNSW only once that is measured to be too slow, and then use iterative scans with an ANN-vs-exact recall canary on the permitted corpus. Hybrid (full-text + vector) fuses inside the same filtered statement. The merge gate: the reference model gains <code>retrievable_spans</code>, the Hypothesis state machine asserts that vector and hybrid results equal it for every person after every step, AE10 is restated for vectors, and a deliberately leaky join is shown to fail the property.</p>
+    <figure>
+      <svg viewBox="0 0 760 150" role="img" aria-label="ANN then filter returns two results; filter then rank returns ten">
+        <text class="cap" x="20" y="22">ANN TOP-10, THEN FILTER</text>
+        <text class="cap" x="420" y="22">READ_CLAUSE, THEN RANK TOP-10</text>
+        <g stroke="#a3aca8" fill="#eef1ef">
+          <rect x="20" y="40" width="24" height="24"/><rect x="80" y="40" width="24" height="24"/><rect x="110" y="40" width="24" height="24"/><rect x="140" y="40" width="24" height="24"/><rect x="170" y="40" width="24" height="24"/><rect x="200" y="40" width="24" height="24"/><rect x="260" y="40" width="24" height="24"/><rect x="290" y="40" width="24" height="24"/>
+        </g>
+        <g stroke="#1d6a48" fill="#e2f0e8">
+          <rect x="50" y="40" width="24" height="24"/><rect x="230" y="40" width="24" height="24"/>
+          <rect x="420" y="40" width="24" height="24"/><rect x="450" y="40" width="24" height="24"/><rect x="480" y="40" width="24" height="24"/><rect x="510" y="40" width="24" height="24"/><rect x="540" y="40" width="24" height="24"/><rect x="570" y="40" width="24" height="24"/><rect x="600" y="40" width="24" height="24"/><rect x="630" y="40" width="24" height="24"/><rect x="660" y="40" width="24" height="24"/><rect x="690" y="40" width="24" height="24"/>
+        </g>
+        <text class="lbl" x="20" y="90">2 results; the gaps hint at what is hidden</text>
+        <text class="lbl" x="420" y="90">10 results, all readable</text>
+        <rect x="20" y="115" width="14" height="14" fill="#e2f0e8" stroke="#1d6a48"/><text class="sm" x="40" y="126">readable by this person</text>
+        <rect x="200" y="115" width="14" height="14" fill="#eef1ef" stroke="#a3aca8"/><text class="sm" x="220" y="126">nearest match, but hidden from this person</text>
+      </svg>
+      <figcaption>The default pgvector pattern (left) reproduces exactly the failure that README:55 and AE10 were written to forbid.</figcaption>
+    </figure>
+    <h4>Basis</h4>
+    <ul class="basis">
+      <li><span class="tag">direct:</span> <code>.where(read_clause(subject, Action.RETRIEVE, d, v), …).order_by(rank.desc(), v.c.id).limit(limit)</code> (<code>services/search.py:24-31</code>). README:55 says: “a restricted-heavy corpus would return two results instead of ten, and the gaps would hint at what is hidden.” AE10 is at plan line 226.</li>
+      <li><span class="tag">direct:</span> the property test “checks that, for every person in every workspace, the reference model, the SQL read predicates, the single-item decision, UI search and the MCP search service all agree” (<code>tests/test_policy_properties.py:1-8</code>). <code>endpoint_grounds.py:1-4</code> keeps its oracle independent of <code>app.policy</code>.</li>
+      <li><span class="tag">external:</span> pgvector filters after the approximate HNSW scan, and v0.8 iterative scans are the mitigation (verified accurate by the critique pass).</li>
+    </ul>
+    <h4>Rationale</h4>
+    <p>“Permission-safe vector search” is where most RAG systems quietly leak or lose recall, and Lattice already has the oracle that makes it provable rather than arguable. Wiring every new retrieval path (vector, hybrid, graph, reranked) into the existing property test means no future strategy can ship with a leak. That is the moat the existing work already paid for.</p>
+    <h4>Downsides</h4>
+    <p>It needs a pgvector-enabled image in <code>compose.yaml</code>, the Dockerfile and the testcontainers harness. “Exact scan is fast enough” is unmeasured: managers read the whole workspace (<code>IS_MANAGER</code> is <code>true()</code>), so their permitted set is the full corpus. The embedding provider decision is still open and lands on this idea first.</p>
+  </article>
+
+  <article class="idea" id="i5">
+    <div class="chips"><span class="chip id">I5</span><span class="chip">Derived-index lifecycle</span><span class="chip med">Confidence 65%</span><span class="chip">Complexity Medium</span></div>
+    <h3>I5. One derivations ledger: readiness, pipeline version, withdrawal</h3>
+    <h4>Description</h4>
+    <p>A single <code>derivations(version_id, kind, producer, config_hash, status, error)</code> table is at once the job queue (claimed with <code>FOR UPDATE SKIP LOCKED</code> by an in-process loop, so no new service), the per-version freshness view, and the purge ledger. Versions are immutable, so derived rows are only ever inserted or purged. Retrieval security never depends on the queue, because every derived table joins through <code>read_clause</code> and withdrawal hides content instantly. A <em>bill of derivatives</em> makes each derived table register a withdrawal rule. A guard test fails any new derived table without one, and a canary withdrawal proves nothing derived stays retrievable. Purge completion is written to the audit trail. <code>config_hash</code> lets a new embedding model build alongside the old one before a switch. The ledger also forces the one fork that has to be decided up front: <strong>when derivation runs</strong>.</p>
+    <figure>
+      <svg viewBox="0 0 760 195" role="img" aria-label="Three options for when derivation runs relative to approval">
+        <path d="M200 60 H740" stroke="#121417"/>
+        <g stroke="#121417"><path d="M200 52 V68"/><path d="M330 52 V68"/><path d="M460 52 V68"/><path d="M740 52 V68"/></g>
+        <text class="cap" x="200" y="42" text-anchor="middle">UPLOAD</text>
+        <text class="cap" x="330" y="42" text-anchor="middle">DRAFT</text>
+        <text class="cap" x="460" y="42" text-anchor="middle">APPROVE</text>
+        <text class="cap" x="736" y="42" text-anchor="end">SERVING</text>
+        <text class="lbl" x="10" y="101">(a) visible lag</text>
+        <rect x="460" y="86" width="280" height="22" fill="#e4ecf8" stroke="#2b5fae"/>
+        <text class="sm" x="470" y="101">derive; serve lexical-only meanwhile</text>
+        <text class="lbl" x="10" y="136">(b) gate on ready</text>
+        <rect x="330" y="121" width="130" height="22" fill="#fbf0d8" stroke="#845600"/>
+        <text class="sm" x="340" y="136">derive the draft</text>
+        <text class="lbl" x="10" y="171">(c) approved-only egress</text>
+        <rect x="460" y="156" width="280" height="22" fill="#e2f0e8" stroke="#1d6a48"/>
+        <text class="sm" x="470" y="171">derive; local model; each call audited</text>
+      </svg>
+      <figcaption>(a) approval is instant and the screen and agent responses say “lexical only until embeddings finish”. (b) Approve is refused until a ready derivation exists, so approve means fully searchable in one commit. (c) nothing unapproved ever leaves the box, at the cost of a heavier image.</figcaption>
+    </figure>
+    <h4>Basis</h4>
+    <ul class="basis">
+      <li><span class="tag">direct:</span> <code>compose.yaml</code> defines only <code>db</code>, <code>migrate</code> and <code>app</code>. No worker or queue exists anywhere in <code>backend/app</code>.</li>
+      <li><span class="tag">direct:</span> <code>search_vector</code> is <code>Computed(…, persisted=True)</code> (<code>models.py:159-165</code>), so today's index is atomic with approval. Embeddings cannot be, which is exactly why the fork appears. <code>withdraw()</code> (<code>services/documents.py:139-147</code>) touches nothing derived.</li>
+      <li><span class="tag">direct:</span> <code>audit_events</code> allows <code>channel='system'</code> with a nullable actor (<code>models.py:276,288</code>), so purge receipts fit the existing trail.</li>
+      <li><span class="tag">external:</span> OWASP RAG cascade deletion, orphan scans and deletion logs; FDA-style mock recalls, where untested recall paths fail the first time they are needed; materialized-view dependency invalidation.</li>
+    </ul>
+    <h4>Rationale</h4>
+    <p>It is the one piece of infrastructure every producer (parse, chunk, embed, extract) needs, and it adds no dependency beyond the Postgres already running. It splits two concerns that RAG systems usually blur: <em>access</em> is gated instantly by SQL, and <em>storage</em> is purged eventually with a receipt. That keeps “withdrawn means agents never see it again” honest the day someone adds a <code>chunk_embeddings</code> table.</p>
+    <h4>Downsides</h4>
+    <p>“Purged” is partial by design. Withdrawn <em>bodies</em> stay in <code>document_versions</code> forever under the immutability trigger, so the receipt covers derivatives only and must say so. <code>audit.record()</code> needs a non-person path. Option (b) sends draft text to a provider, which conflicts with (c) unless the model is local. The fork is a product decision, not an engineering one.</p>
+  </article>
+
+  <article class="idea" id="i6">
+    <div class="chips"><span class="chip id">I6</span><span class="chip">Graph knowledge</span><span class="chip med">Confidence 60%</span><span class="chip">Complexity Medium</span></div>
+    <h3>I6. Governed graph: edges inherit evidence readability, deterministic first</h3>
+    <h4>Description</h4>
+    <p>The graph has no permission model of its own. An edge is <code>(subject_entity, predicate, object_entity)</code> plus a set of evidence spans (I3). A person sees an edge only through the evidence they can read under <code>read_clause</code>. Its rendered description, degree and “mentioned in N documents” are computed from that readable evidence alone, never from a stored merged summary. Start without an LLM. An admin-approved registry of entities and aliases (<code>payments-gateway</code>, <code>checkout</code>), maintained through the same draft → approve flow, produces deterministic mention edges and “mentioned by” backlinks. This becomes the baseline any LLM extractor or community report has to beat.</p>
+    <figure>
+      <svg viewBox="0 0 760 210" role="img" aria-label="payments-gateway entity linked to three documents with different audiences">
+        <rect x="20" y="20" width="220" height="40" fill="#fcfdfc" stroke="#121417"/>
+        <text class="lbl" x="30" y="37">Architecture</text><text class="sm" x="30" y="52">shared: Platform + Payments</text>
+        <rect x="20" y="120" width="220" height="40" fill="#fcfdfc" stroke="#121417"/>
+        <text class="lbl" x="30" y="137">Timeouts runbook</text><text class="sm" x="30" y="152">shared: Platform</text>
+        <rect x="540" y="70" width="200" height="40" fill="#fcfdfc" stroke="#121417"/>
+        <text class="lbl" x="550" y="87">Incident report</text><text class="sm" x="550" y="102">shared: Payments</text>
+        <g stroke="#616a66" fill="none"><path d="M240 40 L318 80"/><path d="M240 140 L318 100"/><path d="M540 90 H452"/></g>
+        <ellipse cx="385" cy="90" rx="68" ry="22" fill="#e4ecf8" stroke="#2b5fae"/>
+        <text class="mono" x="385" y="94" text-anchor="middle">payments-gateway</text>
+        <text class="sm" x="20" y="190">Mei (Platform) sees edges backed by Architecture + Timeouts. Sam (Payments) sees Architecture + Incident. Neither sees the other's evidence, counts or summary.</text>
+      </svg>
+      <figcaption>The seed corpus already contains the leak a merged GraphRAG entity summary would create.</figcaption>
+    </figure>
+    <h4>Basis</h4>
+    <ul class="basis">
+      <li><span class="tag">direct:</span> the proposal says “Every relationship should link to supporting passages and respect their permissions.” (<code>governed-knowledge-store-thoughts.md:120</code>) and “Apply permissions to supporting passages, graph relationships and any derived summaries.” (<code>:81</code>).</li>
+      <li><span class="tag">direct:</span> in <code>seed.py:163-175</code>, architecture is shared to Platform and Payments, the timeouts runbook to Platform only, and the incident to Payments only. All three name <code>payments-gateway</code> in prose (<code>seed.py:33-55</code>), and no code links them.</li>
+      <li><span class="tag">direct:</span> the proposal calls a small graph “graph-assisted retrieval” and warns that full GraphRAG “would considerably expand the first release” (<code>:124</code>).</li>
+      <li><span class="tag">external:</span> Microsoft GraphRAG keeps lineage, but its descriptions and reports are LLM prose that blends sources, the one leak a row filter cannot unpick. Library authority records are the precedent for a curated alias registry.</li>
+    </ul>
+    <h4>Rationale</h4>
+    <p>It turns “governed GraphRAG” from a slogan into a testable property that plugs into I4's oracle (<code>visible_edges</code> in the reference model). Starting deterministic makes graph-assisted retrieval buildable in days with no hallucinated edges, and answers “does a graph help here at all?” before anyone pays for LLM indexing.</p>
+    <h4>Downsides</h4>
+    <p>One rule is still open: an edge visible if <em>any</em> supporting evidence is readable, or only if <em>all</em> of it is. “All” over-hides co-mentions, and “any” is safe only if descriptions are never stored merged. Documents have no type field, so “incident affects service” is only co-mention until types exist. The alias registry is itself content and needs read rules or it leaks entity names. An approver-side “edge delta” view is a natural follow-on but needs this layer first.</p>
+  </article>
+
+  <article class="idea" id="i7">
+    <div class="chips"><span class="chip id">I7</span><span class="chip">Extraction fidelity &amp; review</span><span class="chip med">Confidence 65%</span><span class="chip">Complexity Medium</span></div>
+    <h3>I7. Fidelity-and-permission benchmark on the Acme seed</h3>
+    <h4>Description</h4>
+    <p>Turn the existing Acme Engineering scenario into a benchmark that every producer change has to pass. It contains a hostile file set (zero-width and white-on-white text, a scanned page, a table-heavy PDF) with gold spans, and questions asked as Mei, Sam, an owner and an outsider, across a withdrawn runbook, a pending edit and a rejected draft. It reports extraction completeness, allowed-only Recall@k, denied-retrieval rate (must be exactly 0), citation resolution (I3), deletion propagation (I5), and edge precision against I6's deterministic baseline. Swapping a parser, chunker, embedding model or reranker becomes a measured change.</p>
+    <h4>Basis</h4>
+    <ul class="basis">
+      <li><span class="tag">direct:</span> <code>endpoint_grounds.py</code>'s expected visibility is “written out … not derived from app.policy, so it stays an independent oracle” (lines 1-4, 368-374). That is the same discipline, extended to retrieval quality.</li>
+      <li><span class="tag">direct:</span> <code>PRODUCT.md:38</code> already defines the negative cases: “a runbook edit awaiting approval, a withdrawn runbook, a draft and a rejected draft”. The proposal itself asks for evaluation first (<code>governed-knowledge-store-thoughts.md:126-139</code>).</li>
+      <li><span class="tag">external:</span> Ragas measures retrieval and answers but not parse fidelity or citation correctness. The two planes have to be built together.</li>
+    </ul>
+    <h4>Rationale</h4>
+    <p>Every choice in this slice (parser, chunk size, embedding model, contextual annotations, graph extractor) is a swappable bet. One yardstick turns each swap into evidence instead of debate. It also produces the “evidence showing how well it works” the proposal promises. The denied-retrieval number is the one most RAG vendors cannot publish.</p>
+    <h4>Downsides</h4>
+    <p>Building the hostile file set and gold spans is real work. A roughly six-document seed corpus is too small for meaningful recall or baseline-vs-LLM comparisons, so the corpus has to grow. Building it before any pipeline exists delays the first visible feature.</p>
+  </article>
+</section>
+
+<section id="rejection-summary">
+  <h2>Rejection Summary</h2>
+  <table>
+    <thead><tr><th>#</th><th>Idea</th><th>Reason Rejected</th></tr></thead>
+    <tbody>
+      <tr><td>C2</td><td>Accessioned intake log with batch manifest for folders and zips</td><td>Duplicates a stronger idea. The source-hash intake record merged into I1. The zip/folder manifest was cut as scope creep beyond the v1 Markdown + text-PDF scope, and it adds decompression-bomb surface.</td></tr>
+      <tr><td>C3</td><td>Re-upload resolves to a new version, not a duplicate</td><td>Below the ambition floor on its own; it is a UX rule. Kept as a rule inside I1. Note: edits are author-only (<code>policy.py:281-282</code>) and withdrawn documents reject new drafts.</td></tr>
+      <tr><td>C5</td><td>Two-channel reconciliation (text layer vs rendered-page OCR)</td><td>Basis weak, judged by the critique pass: OCR alignment is noisy, adds native dependencies, and hidden text is detectable structurally. Folded into I2 as an option.</td></tr>
+      <tr><td>C8</td><td>Every new retrieval path is born under the property test</td><td>Duplicates a stronger idea; merged into I4 as its merge gate.</td></tr>
+      <tr><td>C10</td><td>Readiness contract: lexical-only lag vs gate-on-ready vs derive-after-approval</td><td>Duplicates a stronger idea; it is the central fork inside I5.</td></tr>
+      <tr><td>C11</td><td>Bill of derivatives + mock recall drill</td><td>Duplicates a stronger idea; merged into I5.</td></tr>
+      <tr><td>C12</td><td>Index generations with a blue/green flip per workspace</td><td>Basis weak and premature, since no vectors or provider exist yet. The <code>config_hash</code> column in I5 keeps the option open.</td></tr>
+      <tr><td>C13</td><td>Content-hash embedding reuse per workspace</td><td>Basis weak: the saving rests on unmeasured edit locality, embedding cost for 200k-character bodies is small, and hash-shared rows conflict with span-keyed purge (refcounts).</td></tr>
+      <tr><td>C14</td><td>Original bytes pinned to the version; parser upgrades arrive as re-extraction drafts</td><td>Duplicates a stronger idea; merged into I1, with the system-actor and pending-draft caveats carried into I1's downsides.</td></tr>
+      <tr><td>C15</td><td>Egress gating: nothing unapproved reaches an embedding provider</td><td>Duplicates a stronger idea; carried as option (c) of I5's fork. It also only covers unapproved text, so approved but group-restricted text still egresses.</td></tr>
+      <tr><td>C16</td><td>Edge visibility derived from evidence readability</td><td>Duplicates a stronger idea; merged into I6.</td></tr>
+      <tr><td>C17</td><td>Deterministic graph first via an approved entity/alias registry</td><td>Duplicates a stronger idea; merged into I6.</td></tr>
+      <tr><td>C18</td><td>Graph diff and impact map on the review card</td><td>Better handled as a brainstorm variant of I6: it needs a graph or mention layer to exist first.</td></tr>
+      <tr><td>X1</td><td>Governed derivation spine (spans + ledger + bill of derivatives + evidence-derived edges)</td><td>Umbrella of I3, I5 and I6 rather than a separate move; recorded as the thread through the ranked set.</td></tr>
+      <tr><td>X2</td><td>The approval card becomes the knowledge review (text + receipt + edge delta)</td><td>Depends on weak C5 and on a graph layer, and risks overloading the scarce approver role. I2 keeps the receipt part.</td></tr>
+      <tr><td>X3</td><td>Deterministic graph as the benchmark baseline</td><td>Duplicates a stronger idea; merged into I7.</td></tr>
+    </tbody>
+  </table>
+  <p>Merged without separate rows: C1 → I1, C4 → I2, C6 → I3, C7 → I4, C9 → I5, C19 → I7. No axis ended without a survivor.</p>
+</section>
+
+<footer class="composition-signal">Composed <time datetime="2026-10-15T17:20+13:00">2026-10-15 17:20 NZDT</time> by ce-ideate from the prompt “allowing users to upload different documents, implementing pipeline to ingest the document and making them ready for RAG and graphrag”, grounded in the lattice-pkt repository.</footer>
+</main>
+</body>
+</html>
