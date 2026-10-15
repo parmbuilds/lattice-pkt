@@ -149,3 +149,11 @@ async def load_subject(
         channel=channel,
         token_id=token_id,
     )
+
+
+async def workspace_subject(workspace_id: UUID, user: SignedIn, db: DB) -> Subject:
+    """The signed-in user's live role and groups in the workspace named by the path."""
+    return await load_subject(db, user.user_id, workspace_id)
+
+
+Member = Annotated[Subject, Depends(workspace_subject)]

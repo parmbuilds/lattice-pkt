@@ -32,3 +32,25 @@ async def sign_up_and_in(client: httpx.AsyncClient, email: str | None = None) ->
     response = await client.post("/api/auth/signin", json={"email": email, "password": PASSWORD})
     response.raise_for_status()
     return response.json()["csrf_token"]
+
+
+async def user_id(client: httpx.AsyncClient) -> str:
+    return (await client.get("/api/auth/me")).json()["user"]["id"]
+
+
+def seed_workspace(pg: dict[str, str], members: dict[str, str]) -> str:
+    """Insert a workspace and memberships directly (user_id -> role); returns its id."""
+    import psycopg
+
+    from tests.conftest import plain_dsn
+
+    with psycopg.connect(plain_dsn(pg["app"])) as conn:
+        workspace_id = conn.execute(
+            "INSERT INTO workspaces (name) VALUES ('Seeded') RETURNING id"
+        ).fetchone()[0]
+        for uid, role in members.items():
+            conn.execute(
+                "INSERT INTO memberships (workspace_id, user_id, role) VALUES (%s, %s, %s)",
+                (workspace_id, uid, role),
+            )
+    return str(workspace_id)
