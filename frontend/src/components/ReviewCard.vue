@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { diffSegments } from '../diff'
 import { type Derivation, derivationStamp, type DocumentSummary, useLoad } from '../session'
@@ -32,6 +32,15 @@ const props = defineProps<{
 
 const path = computed(() => `${props.base}/documents/${props.doc.id}`)
 const review = useLoad<Review>(() => `${path.value}/review`)
+// The worker readies drafts in the background: check again until this one is ready (R11).
+watch(
+  () => review.data,
+  (data, _old, onCleanup) => {
+    if (!data || data.derivation.status === 'ready') return
+    const timer = setTimeout(review.reload, 2000)
+    onCleanup(() => clearTimeout(timer))
+  },
+)
 const segments = computed(() => diffSegments(review.data?.diff ?? []).filter((s) => s.kind !== 'file'))
 const reason = ref('')
 const acknowledged = ref(false)

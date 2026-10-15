@@ -335,12 +335,25 @@ describe('ReviewCard', () => {
     expect(JSON.parse(init.body as string)).toEqual({ version_id: 'v1', acknowledged_receipt: 'abc123' })
   })
 
-  it('keeps Approve disabled with the readiness hint while the derivation is pending', async () => {
-    mockApi({ [`GET ${BASE}/d1/review`]: review({ derivation: { status: 'pending', error: null } }) })
-    await mountReview()
-    expect(document.body.textContent).toContain('Preparing')
-    expect(approveButton().disabled).toBe(true)
-    expect(document.body.textContent).toContain('Approve unlocks once the draft is ready for search.')
+  it('keeps Approve disabled while the derivation is pending, then enables it once ready', async () => {
+    let calls = 0
+    mockApi({
+      [`GET ${BASE}/d1/review`]: () =>
+        review({ derivation: { status: calls++ === 0 ? 'pending' : 'ready', error: null } }),
+    })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await mountReview()
+      expect(document.body.textContent).toContain('Preparing')
+      expect(approveButton().disabled).toBe(true)
+      expect(document.body.textContent).toContain('Approve unlocks once the draft is ready for search.')
+      await vi.advanceTimersByTimeAsync(2000) // no page reload: the card checks again by itself
+      await flushPromises()
+      expect(approveButton().disabled).toBe(false)
+      expect(calls).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renders hidden content and an HTML-looking filename as text', async () => {

@@ -246,11 +246,10 @@ test('an uploaded Markdown file is approved, found by search and shown on its en
 
   // Approve once the draft is ready for search.
   await nav(page, 'Approvals').click()
+  await expect(page).toHaveURL(/\/approvals$/)
+  // The review card checks again by itself until the background worker has derived the draft.
   const approve = page.getByRole('button', { name: 'Approve' })
-  await expect(async () => {
-    await page.reload()
-    await expect(approve).toBeEnabled({ timeout: 1000 })
-  }).toPass({ timeout: 30_000 })
+  await expect(approve).toBeEnabled({ timeout: 30_000 })
   await approve.click()
   await expect(status(page)).toContainText('it is now the serving version')
 
