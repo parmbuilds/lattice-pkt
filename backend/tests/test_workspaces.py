@@ -280,3 +280,13 @@ async def test_deleting_a_group_removes_its_grants(settings, pg):
         assert response.status_code == 200
         assert response.json()["grants_removed"] == 1
         assert _sql(pg, "SELECT 1 FROM document_grants WHERE document_id = %s", doc) == []
+
+
+async def test_the_owners_own_role_cannot_be_changed_directly(settings):
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        response = await owner.patch(
+            f"/api/workspaces/{ws}/members/{owner.user_id}", json={"role": "member"}
+        )
+        assert response.status_code == 404  # ownership moves only by transfer (R8)
+        assert (await _roles(owner, ws))[owner.user_id] == "owner"

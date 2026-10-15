@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -86,7 +86,7 @@ async def change_role(user_id: UUID, body: RoleChange, subject: Member, db: DB) 
         db,
         subject,
         Action.CHANGE_ROLE,
-        target_role=body.role if target and target.role != "owner" else None,
+        target_role=target.role if target else None,  # the policy refuses the owner
         detail={"target_user_id": str(user_id)},
     )
     # Demotion changes only the role; tokens and groups stay (Assumptions, AE8).
@@ -128,11 +128,6 @@ async def transfer_ownership(body: Transfer, subject: Member, db: DB) -> dict:
 async def create_invite(body: NewInvite, subject: Member, request: Request, db: DB) -> dict:
     await authorize(db, subject, Action.INVITE, target_role=body.role)
     settings = request.app.state.settings
-    lifetime = (
-        timedelta(hours=settings.admin_invite_hours)
-        if body.role == "admin"
-        else timedelta(days=settings.member_invite_days)
-    )
     issued = security.issue("inv", settings.secret_pepper)
     invite = Invite(
         workspace_id=subject.workspace_id,
@@ -140,7 +135,7 @@ async def create_invite(body: NewInvite, subject: Member, request: Request, db: 
         inviter_id=subject.user_id,
         prefix=issued.prefix,
         verifier=issued.verifier,
-        expires_at=datetime.now(UTC) + lifetime,
+        expires_at=datetime.now(UTC) + settings.invite_lifetime(body.role),
     )
     db.add(invite)
     await db.flush()

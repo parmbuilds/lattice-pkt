@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     def session_absolute(self) -> timedelta:
         return timedelta(days=self.session_absolute_days)
 
+    def invite_lifetime(self, role: str) -> timedelta:
+        # KTD7: admin invites carry more power, so they expire sooner.
+        return {
+            "admin": timedelta(hours=self.admin_invite_hours),
+            "member": timedelta(days=self.member_invite_days),
+        }[role]
+
 
 @lru_cache
 def get_settings() -> Settings:
