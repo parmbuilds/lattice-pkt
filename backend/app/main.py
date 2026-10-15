@@ -1,10 +1,12 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from app.auth import GuardMiddleware
@@ -44,11 +46,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     static_dir = Path(settings.static_dir) if settings.static_dir else None
     spa = SpaFiles(directory=static_dir, html=True) if static_dir and static_dir.is_dir() else None
 
+    public_host = urlsplit(settings.public_origin).netloc
+
     async def root(scope, receive, send):
         # /mcp goes to the MCP server; everything else outside /api is the UI (KTD12).
         path = scope.get("path", "")
         if path == "/mcp" or path.startswith("/mcp/") or spa is None:
             return await mcp_asgi(scope, receive, send)
+        host = dict(scope["headers"]).get(b"host", b"").decode()
+        if scope["method"] in ("GET", "HEAD") and host != public_host:
+            # The API refuses any other Origin, so a page loaded from an alias such as
+            # 127.0.0.1 could never sign in; send the browser to the one public origin.
+            query = scope.get("query_string", b"").decode()
+            target = settings.public_origin + path + (f"?{query}" if query else "")
+            return await RedirectResponse(target, status_code=307)(scope, receive, send)
         return await spa(scope, receive, send)
 
     @asynccontextmanager
