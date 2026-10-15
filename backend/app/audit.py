@@ -87,14 +87,19 @@ async def authorize(
     target_group_id: UUID | None = None,
     target_role: Role | None = None,
     detail: dict[str, Any] | None = None,
+    defer_allowed: bool = False,
 ) -> Decision:
     """Decide, record, and on denial end the request with the generic response.
 
     A denial still commits its audit row (KTD8), so it is raised through CommitThenRaise.
+    With `defer_allowed`, an allowed decision is recorded by the caller once it knows the
+    outcome (a search records the versions it returned).
     """
     decision = decide(
         subject, action, document, target_group_id=target_group_id, target_role=target_role
     )
+    if decision.allowed and defer_allowed:
+        return decision
     await record(
         db,
         subject,

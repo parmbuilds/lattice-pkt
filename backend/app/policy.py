@@ -74,6 +74,7 @@ class Action(StrEnum):
     ACCEPT_INVITE = "accept_invite"
     REVIEW = "review"
     LIST_DOCUMENTS = "list_documents"
+    SEARCH = "search"
 
 
 @dataclass(frozen=True)
@@ -216,7 +217,7 @@ def decide(
     if subject.role is None or (document and document.workspace_id != subject.workspace_id):
         return deny("workspace.not_member")
     # R33: MCP is retrieval-only, whatever the user's role.
-    if subject.channel == "mcp" and action is not Action.RETRIEVE:
+    if subject.channel == "mcp" and action not in (Action.RETRIEVE, Action.SEARCH):
         return deny("channel.mcp_retrieval_only")
 
     rule = _rule_for(subject, action, document, target_group_id, target_role)
@@ -245,6 +246,8 @@ def _rule_for(
         return "create.member"  # R15: any member adds documents (as drafts)
     if action is Action.LIST_DOCUMENTS:
         return "list.member"  # each row is then filtered by the VIEW read rules
+    if action is Action.SEARCH:
+        return "search.member"  # results are filtered in the query by the RETRIEVE rules
     if action is Action.MANAGE_OWN_TOKENS:
         return "tokens.own"  # R22
     if action is Action.CREATE_WORKSPACE:

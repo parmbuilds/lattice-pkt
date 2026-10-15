@@ -108,6 +108,7 @@ def test_mcp_channel_allows_retrieval_only():
     agent = replace(ACTORS["owner"], channel="mcp")
     serving = replace(DOC, version_is_serving=True)
     assert decide(agent, Action.RETRIEVE, serving).allowed is True
+    assert decide(agent, Action.SEARCH).allowed is True
     for action in (Action.APPROVE, Action.SHARE, Action.INVITE, Action.MANAGE_OWN_TOKENS):
         decision = decide(agent, action, DOC, target_group_id=GROUP_G, target_role="member")
         assert decision.allowed is False

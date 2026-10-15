@@ -13,6 +13,7 @@ from app.routers import audit as audit_routes
 from app.routers import auth as auth_routes
 from app.routers import documents as document_routes
 from app.routers import groups as group_routes
+from app.routers import search as search_routes
 from app.routers import workspaces as workspace_routes
 
 
@@ -46,6 +47,7 @@ def create_app(settings: Settings | None = None, mcp: MCPServer | None = None) -
     app.include_router(workspace_routes.router)
     app.include_router(group_routes.router)
     app.include_router(document_routes.router)
+    app.include_router(search_routes.router)
 
     @app.get("/api/health")
     async def health(request: Request) -> dict[str, str]:
