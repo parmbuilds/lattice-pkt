@@ -5,9 +5,11 @@ from fastapi import FastAPI, Request
 from mcp.server import MCPServer
 from sqlalchemy import text
 
+from app.auth import GuardMiddleware
 from app.config import Settings, get_settings
 from app.db import make_engine, make_sessionmaker
 from app.mcp_server import transport_security
+from app.routers import auth as auth_routes
 
 
 def create_app(settings: Settings | None = None, mcp: MCPServer | None = None) -> FastAPI:
@@ -34,6 +36,8 @@ def create_app(settings: Settings | None = None, mcp: MCPServer | None = None) -
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessionmaker = make_sessionmaker(engine)
+    app.add_middleware(GuardMiddleware, settings=settings)
+    app.include_router(auth_routes.router)
 
     @app.get("/api/health")
     async def health(request: Request) -> dict[str, str]:
