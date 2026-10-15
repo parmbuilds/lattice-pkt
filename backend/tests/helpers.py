@@ -84,3 +84,43 @@ async def join(
     token = await invite(owner, workspace_id, role)
     response = await newcomer.post("/api/invites/accept", json={"token": token})
     response.raise_for_status()
+
+
+async def add_document(
+    client: httpx.AsyncClient,
+    workspace_id: str,
+    title="Runbook",
+    body="Restart the checkout service.",
+) -> dict:
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/documents", json={"title": title, "body": body}
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+async def approve(client: httpx.AsyncClient, workspace_id: str, document: dict) -> None:
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/documents/{document['id']}/approve",
+        json={"version_id": document["pending_version_id"]},
+    )
+    response.raise_for_status()
+
+
+async def retrievable_ids(pg, workspace_id: str, user_id: str) -> set[str]:
+    """What the policy's retrieve predicate returns for a user right now (live role and groups)."""
+    import uuid
+
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.auth import load_subject
+    from app.db import make_sessionmaker
+    from app.policy import Action, readable_versions
+
+    engine = create_async_engine(pg["app"])
+    try:
+        async with make_sessionmaker(engine)() as db:
+            subject = await load_subject(db, uuid.UUID(user_id), uuid.UUID(workspace_id))
+            return {str(v) for v in await db.scalars(readable_versions(subject, Action.RETRIEVE))}
+    finally:
+        await engine.dispose()

@@ -72,6 +72,8 @@ class Action(StrEnum):
     CREATE_WORKSPACE = "create_workspace"
     REVOKE_INVITE = "revoke_invite"
     ACCEPT_INVITE = "accept_invite"
+    REVIEW = "review"
+    LIST_DOCUMENTS = "list_documents"
 
 
 @dataclass(frozen=True)
@@ -241,6 +243,8 @@ def _rule_for(
 
     if action is Action.CREATE_DOCUMENT:
         return "create.member"  # R15: any member adds documents (as drafts)
+    if action is Action.LIST_DOCUMENTS:
+        return "list.member"  # each row is then filtered by the VIEW read rules
     if action is Action.MANAGE_OWN_TOKENS:
         return "tokens.own"  # R22
     if action is Action.CREATE_WORKSPACE:
@@ -282,7 +286,7 @@ def _rule_for(
         return "share.author" if author and target_group_id in s.group_ids else None
     if action is Action.UNSHARE:  # R12: authors may unshare from any group
         return "unshare.manager" if manager else ("unshare.author" if author else None)
-    if action in (Action.APPROVE, Action.REJECT):  # R15, R16, R31
+    if action in (Action.APPROVE, Action.REJECT, Action.REVIEW):  # R15, R16, R31, R35
         return f"{action}.manager" if manager and live and doc.has_pending else None
     if action is Action.DISCARD:  # R31
         return "discard.author" if author and live and doc.has_pending else None

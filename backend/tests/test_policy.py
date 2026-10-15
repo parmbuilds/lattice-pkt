@@ -53,6 +53,8 @@ WRITE_MATRIX = [
     (Action.UNSHARE, {"target_group_id": GROUP_H}, DOC, (Y, Y, Y, N)),
     (Action.APPROVE, {}, DOC, (Y, Y, N, N)),
     (Action.REJECT, {}, DOC, (Y, Y, N, N)),
+    (Action.REVIEW, {}, DOC, (Y, Y, N, N)),
+    (Action.LIST_DOCUMENTS, {}, None, (Y, Y, Y, Y)),
     (Action.DISCARD, {}, DOC, (N, N, Y, N)),
     (Action.WITHDRAW, {}, DOC, (Y, Y, Y, N)),
     (Action.REASSIGN_AUTHOR, {}, DOC, (Y, Y, N, N)),
