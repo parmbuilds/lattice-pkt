@@ -1,4 +1,6 @@
 import asyncio
+import random
+import string
 
 import psycopg
 
@@ -290,3 +292,47 @@ async def test_a_rejected_first_draft_stays_listed_for_its_author_and_managers(s
         assert (await listed(author))[doc["id"]] == "Rejected first draft"
         assert (await listed(owner))[doc["id"]] == "Rejected first draft"
         assert doc["id"] not in await listed(other)
+
+
+def _prose(chars: int) -> str:
+    """Zipf-distributed words from a 20,000-word vocabulary, like long English prose."""
+    rng = random.Random(7)
+    letters = string.ascii_lowercase
+    vocab = ["".join(rng.choices(letters, k=rng.randint(3, 10))) for _ in range(20_000)]
+    weights = [1 / rank for rank in range(1, len(vocab) + 1)]
+    return " ".join(rng.choices(vocab, weights, k=chars // 4))[:chars]
+
+
+def _distinct_tokens(chars: int) -> str:
+    """Every word unique: the worst case for tsvector size."""
+    rng = random.Random(11)
+    return " ".join(
+        "".join(rng.choices(string.ascii_lowercase, k=9)) for _ in range(chars // 10 + 1)
+    )[:chars]
+
+
+async def test_a_million_character_body_is_accepted_and_one_more_is_refused(settings):
+    """Covers R6."""
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        doc = await add_document(owner, ws, body=_prose(1_000_000))
+        assert doc["pending_version_id"]
+        too_long = await owner.post(
+            _docs_url(ws), json={"title": "Too long", "body": "a" * 1_000_001}
+        )
+        assert too_long.status_code == 400
+
+
+async def test_a_body_too_diverse_for_its_search_index_is_refused_and_stores_nothing(settings, pg):
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        response = await owner.post(
+            _docs_url(ws), json={"title": "Diverse", "body": _distinct_tokens(1_000_000)}
+        )
+        assert response.status_code == 422
+        assert "too many distinct words" in response.json()["detail"]
+        with psycopg.connect(plain_dsn(pg["superuser"])) as conn:
+            stored = conn.execute(
+                "SELECT count(*) FROM documents WHERE workspace_id = %s", (ws,)
+            ).fetchone()[0]
+        assert stored == 0

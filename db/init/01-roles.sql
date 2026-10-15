@@ -15,6 +15,9 @@ ALTER DATABASE lattice OWNER TO lattice_owner;
 
 \connect lattice
 
+-- pgvector is not a trusted extension, so the superuser installs it (KTD2).
+CREATE EXTENSION IF NOT EXISTS vector;
+
 ALTER SCHEMA public OWNER TO lattice_owner;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO lattice_app;

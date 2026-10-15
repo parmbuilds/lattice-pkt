@@ -12,6 +12,7 @@ from starlette.staticfiles import StaticFiles
 from app.auth import GuardMiddleware
 from app.config import DEV_PEPPER, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
+from app.embedding import make_embedder
 from app.mcp_server import build_mcp, transport_security
 from app.routers import audit as audit_routes
 from app.routers import auth as auth_routes
@@ -39,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.secret_pepper == DEV_PEPPER and not settings.insecure_dev_cookies:
         # The default is public; outside local development it would make every verifier forgeable.
         raise RuntimeError("Set LATTICE_SECRET_PEPPER to a private value.")
+    embedder = make_embedder(settings)
     engine = make_engine(settings.database_url)
     sessionmaker = make_sessionmaker(engine)
     mcp = build_mcp(settings, sessionmaker)
@@ -75,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
+    app.state.embedder = embedder
     app.add_middleware(GuardMiddleware, settings=settings)
     for module in (
         auth_routes,

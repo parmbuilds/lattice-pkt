@@ -44,7 +44,11 @@ def _bootstrap_roles(superuser_dsn: str) -> None:
 @pytest.fixture(scope="session")
 def pg() -> Iterator[dict[str, str]]:
     with PostgresContainer(
-        "postgres:18", username="postgres", password="postgres", dbname="lattice", driver=None
+        "pgvector/pgvector:pg18",
+        username="postgres",
+        password="postgres",
+        dbname="lattice",
+        driver=None,
     ) as container:
         host = container.get_container_host_ip()
         port = container.get_exposed_port(5432)
@@ -76,7 +80,25 @@ def settings(pg: dict[str, str]) -> Settings:
         secret_pepper="test-pepper-0123456789",
         public_origin="http://127.0.0.1:8000",
         insecure_dev_cookies=True,
+        embedder="fake",
     )
+
+
+def pytest_collection_modifyitems(config, items):
+    # The real-model smoke needs the cached model, so it runs only when asked for by marker.
+    if "benchmark_model" in (config.option.markexpr or ""):
+        return
+    skip = pytest.mark.skip(reason="needs the cached model; select with -m benchmark_model")
+    for item in items:
+        if item.get_closest_marker("benchmark_model"):
+            item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _property_suite_uses_the_fake_embedder(request):
+    # Property runs must stay deterministic and offline, so they never load the real model.
+    if request.node.get_closest_marker("property"):
+        assert request.getfixturevalue("settings").embedder == "fake"
 
 
 def _free_port() -> int:

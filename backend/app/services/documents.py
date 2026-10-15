@@ -7,7 +7,9 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
+from psycopg.errors import ProgramLimitExceeded
 from sqlalchemy import select, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import not_found
@@ -15,10 +17,14 @@ from app.models import Document, DocumentGrant, DocumentVersion, VersionDecision
 from app.policy import DocumentState, Subject
 
 MAX_TITLE = 200
-MAX_BODY = 200_000
+MAX_BODY = 1_000_000
 
 STALE_DRAFT = HTTPException(409, "This draft was replaced or already decided. Reload and retry.")
 DOCUMENT_CHANGED = HTTPException(409, "The document changed. Reload and retry.")
+# body_too_diverse: Postgres caps a tsvector at 1 MB, which only very word-diverse bodies reach.
+BODY_TOO_DIVERSE = HTTPException(
+    422, "This body has too many distinct words to index. Split it into smaller documents."
+)
 
 
 def validate(title: str, body: str) -> tuple[str, str]:
@@ -89,7 +95,12 @@ async def new_draft(
         created_by=subject.user_id,
     )
     db.add(version)
-    await db.flush()
+    try:
+        await db.flush()
+    except DBAPIError as error:
+        if isinstance(error.orig, ProgramLimitExceeded):
+            raise BODY_TOO_DIVERSE from None
+        raise
     result = await db.execute(
         update(Document)
         .where(Document.id == doc.id, Document.withdrawn_at.is_(None))

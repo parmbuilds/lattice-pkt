@@ -1,5 +1,6 @@
 from datetime import timedelta
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,40 @@ class Settings(BaseSettings):
     admin_invite_hours: int = 24
 
     search_limit_cap: int = 20
+
+    # Embeddings (KTD1): "fake" is the deterministic test embedder.
+    embedder: Literal["fastembed", "fake"] = "fastembed"
+    # Unset means fastembed's own default, which honours FASTEMBED_CACHE_PATH.
+    embedding_cache_path: str | None = None
+    embed_batch_size: int = Field(default=32, ge=1)
+    embedder_threads: int = Field(default=2, ge=1)
+
+    # Derivation (KTD3): inline mode is for tests and the seed only.
+    derive_inline: bool = False
+    derive_poll_seconds: float = 2.0
+    derive_lease_seconds: int = 300
+
+    # Upload and extraction limits (KTD11, KTD12).
+    upload_max_bytes: int = 20 * 1024 * 1024
+    upload_max_inflight: int = 4
+    extract_timeout_seconds: float = 30.0
+    extract_memory_bytes: int = 1024 * 1024 * 1024
+    extract_concurrency: int = 2
+    extract_max_pdf_pages: int = 500
+    extract_max_zip_members: int = 1000
+    extract_max_zip_member_bytes: int = 50 * 1024 * 1024
+    extract_max_zip_total_bytes: int = 50 * 1024 * 1024
+    extract_max_zip_ratio: int = 100
+
+    # Retrieval (KTD5-KTD7); the distance floor is tuned by the real-model benchmark (R24).
+    vector_distance_floor: float = 0.3
+    vector_candidates: int = 50
+    chunk_max_chars: int = 1200
+
+    # Entity registry caps (KTD14).
+    graph_max_entities: int = 200
+    graph_max_aliases: int = 20
+    graph_max_alias_chars: int = 100
 
     # Directory of the built UI, served same-origin (KTD12); unset in tests and development.
     static_dir: str | None = None
