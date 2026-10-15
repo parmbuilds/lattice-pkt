@@ -146,6 +146,8 @@ def upgrade() -> None:
     )
     # Exact distance only (KTD6): this index serves the join, not the ranking.
     op.create_index("chunks_version_config_idx", "chunks", ["version_id", "config_hash"])
+    # Lets vector search compute distances for one workspace's chunks, not the whole table.
+    op.create_index("chunks_workspace_config_idx", "chunks", ["workspace_id", "config_hash"])
     op.create_table(
         "entities",
         sa.Column("id", sa.UUID(), server_default=sa.text("gen_random_uuid()"), nullable=False),

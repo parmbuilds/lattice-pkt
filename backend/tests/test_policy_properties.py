@@ -7,8 +7,10 @@ service all agree on what that person may read.
 """
 
 import asyncio
+import hashlib
 import uuid
 from dataclasses import replace
+from unittest.mock import patch
 
 import httpx
 import psycopg
@@ -22,18 +24,23 @@ from hypothesis.stateful import (
     rule,
     run_state_machine_as_test,
 )
+from sqlalchemy import select
 
 import app.policy as policy_module
+import app.services.search as search_module
 from app.auth import load_subject
 from app.main import create_app
+from app.models import DocumentVersion
 from app.policy import Action, DocumentState, decide, readable_versions
 from app.services.documents import DERIVATIONS_NOT_READY
 from app.services.search import search
 from tests import reference_model as ref
 from tests.conftest import plain_dsn
 from tests.helpers import PASSWORD
+from tests.test_search import _near
 
 TERM = "latticeterm"  # every document body contains it, so search can see every retrievable one
+NEAR_TERM = _near(TERM)  # in no body, but the fake embedder puts it next to every one
 MEMBER_NAMES = ("admin_a", "m1", "m2", "m3")
 
 
@@ -394,11 +401,31 @@ class PolicyMachine(RuleBasedStateMachine):
                         want_retrieve
                     ), ("ui search", label)
                     agent = replace(subject, channel="mcp")
-                    via_mcp = await search(db, agent, TERM, 20)
+                    embedder = self.app.state.embedder
+                    via_mcp = await search(db, agent, TERM, 20, embedder, self.settings)
                     assert {uuid.UUID(r["version_id"]) for r in via_mcp} == want_retrieve, (
                         "mcp search",
                         label,
                     )
+                    # Meaning only: vectors exist just for versions derived at the current config.
+                    via_vector = await search(db, agent, NEAR_TERM, 20, embedder, self.settings)
+                    assert {uuid.UUID(r["version_id"]) for r in via_vector} == (
+                        want_retrieve & self.ready
+                    ), ("vector search", label)
+                    await _check_spans(db, via_mcp + via_vector)
+
+
+async def _check_spans(db, results) -> None:
+    """Every returned span re-slices its approved body to the recorded sha256 (R16)."""
+    ids = [uuid.UUID(r["version_id"]) for r in results]
+    rows = await db.execute(
+        select(DocumentVersion.id, DocumentVersion.body).where(DocumentVersion.id.in_(ids))
+    )
+    bodies = {str(vid): body for vid, body in rows}
+    for r in results:
+        for span in r["spans"]:
+            piece = bodies[r["version_id"]][span["start"] : span["end"]]
+            assert hashlib.sha256(piece.encode()).hexdigest() == span["sha256"], ("span", r)
 
 
 def _state(doc_id, doc, version_id, pending) -> DocumentState:
@@ -443,6 +470,31 @@ def test_the_property_catches_a_broken_read_rule(settings, pg, monkeypatch):
         machine.change_sharing(_fixed(doc, group), True)
         machine.every_read_path_agrees_with_the_reference_model()  # still fine
         machine.withdraw(_fixed(doc))
+        with pytest.raises(AssertionError):
+            machine.every_read_path_agrees_with_the_reference_model()
+    finally:
+        machine.teardown()
+
+
+@pytest.mark.property
+def test_the_property_catches_a_vector_path_that_skips_the_read_clause(settings, pg, monkeypatch):
+    """Drop the read rules from the vector candidates only, and the invariant must fail."""
+    vector_candidates = search_module._vector_candidates
+
+    def workspace_only(subject, action, d, v):
+        # Keeps the workspace boundary so earlier examples' rows in the shared database stay out.
+        return d.c.workspace_id == subject.workspace_id
+
+    def unfiltered(*args):
+        with patch.object(search_module, "read_clause", workspace_only):
+            return vector_candidates(*args)
+
+    monkeypatch.setattr(search_module, "_vector_candidates", unfiltered)
+    machine = PolicyMachine(settings, pg)
+    try:
+        machine.setup()
+        machine.every_read_path_agrees_with_the_reference_model()  # still fine
+        machine.create_document("m1")  # a draft nobody may retrieve, but it has vectors
         with pytest.raises(AssertionError):
             machine.every_read_path_agrees_with_the_reference_model()
     finally:

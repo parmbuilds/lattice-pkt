@@ -1,3 +1,4 @@
+import hashlib
 import json
 from contextlib import asynccontextmanager
 
@@ -8,6 +9,7 @@ from mcp import Client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from app.main import create_app
+from app.mcp_server import DECLARED
 from tests.conftest import live_server, plain_dsn
 from tests.helpers import (
     PASSWORD,
@@ -80,6 +82,8 @@ async def test_the_tool_list_is_exactly_the_two_retrieval_tools(settings, server
         async with agent(server, await _token(owner, ws)) as client:
             tools = await client.list_tools()
     assert sorted(t.name for t in tools.tools) == ["get_evidence", "search_knowledge"]
+    # Anything outside DECLARED is audited as an override, so the two must never drift (R20).
+    assert {t.name: set(t.input_schema["properties"]) for t in tools.tools} == DECLARED
 
 
 async def test_missing_malformed_revoked_and_expired_tokens_get_401(settings, server, pg):
@@ -255,3 +259,68 @@ async def test_a_demoted_admins_agent_keeps_working_with_member_access(settings,
         assert await _agent_search(server, token, "consul") == {doc["pending_version_id"]}
         await owner.patch(f"/api/workspaces/{ws}/members/{admin.user_id}", json={"role": "member"})
     assert await _agent_search(server, token, "consul") == set()
+
+
+async def test_get_evidence_returns_exactly_the_requested_span(settings, server):
+    body = "Restart the checkout pods.\n\nThen drain the queue."
+    async with signed_in(settings) as owner, signed_in(settings) as other_owner:
+        ws = await create_workspace(owner)
+        elsewhere_ws = await create_workspace(other_owner)
+        doc = await add_document(owner, ws, "Runbook", "v1 checkout text")
+        await approve(owner, ws, doc)
+        superseded = doc["pending_version_id"]
+        edited = (
+            await owner.put(
+                f"/api/workspaces/{ws}/documents/{doc['id']}",
+                json={"title": "Runbook", "body": body},
+            )
+        ).json()
+        await approve(owner, ws, edited)
+        serving = edited["pending_version_id"]
+        elsewhere = await add_document(other_owner, elsewhere_ws, "X", "checkout elsewhere")
+        await approve(other_owner, elsewhere_ws, elsewhere)
+        token = await _token(owner, ws)
+
+        async with agent(server, token) as client:
+            found = _payload(await client.call_tool("search_knowledge", {"query": "checkout"}))
+            (result,) = found["results"]
+            (span,) = result["spans"]
+            ok = await client.call_tool(
+                "get_evidence", {"version_id": serving, "start": 8, "end": 20}
+            )
+            refusals = [
+                await client.call_tool("get_evidence", {"version_id": vid, **bounds})
+                for vid, bounds in (
+                    (serving, {"start": 0, "end": len(body) + 1}),
+                    (serving, {"start": 5, "end": 5}),
+                    (serving, {"start": -1, "end": 3}),
+                    (serving, {"start": 0}),
+                    (superseded, {"start": 0, "end": 3}),
+                    (elsewhere["pending_version_id"], {"start": 0, "end": 3}),
+                    ("not-a-uuid", {"start": 0, "end": 3}),
+                    (superseded, {}),  # the refusal every unreadable id already gets
+                )
+            ]
+            await client.call_tool(
+                "get_evidence", {"version_id": serving, "start": 0, "end": 7, "page": 2}
+            )
+        events = (
+            await owner.get(f"/api/workspaces/{ws}/audit", params={"action": "retrieve"})
+        ).json()["events"]
+    assert (result["version_id"], result["retrieval"]) == (serving, "hybrid")
+    assert span["sha256"] == hashlib.sha256(body[span["start"] : span["end"]].encode()).hexdigest()
+    evidence = _payload(ok)
+    assert evidence["body"] == "the checkout" == body[8:20]
+    assert evidence["span"] == {
+        "start": 8,
+        "end": 20,
+        "sha256": hashlib.sha256(b"the checkout").hexdigest(),
+    }
+    assert all(r.is_error for r in refusals)
+    assert len({r.content[0].text for r in refusals}) == 1  # one indistinguishable response
+    with_unknown, with_span = [e for e in events if e["returned_version_ids"]]
+    # start and end are declared arguments; only the unknown one is an attempted override.
+    assert with_span["detail"]["returned_spans"] == [[serving, 8, 20]]
+    assert "attempted_overrides" not in with_span["detail"]
+    assert with_unknown["detail"]["returned_spans"] == [[serving, 0, 7]]
+    assert with_unknown["detail"]["attempted_overrides"] == {"page": 2}

@@ -46,7 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     embedder = make_embedder(settings)
     engine = make_engine(settings.database_url)
     sessionmaker = make_sessionmaker(engine)
-    mcp = build_mcp(settings, sessionmaker)
+    mcp = build_mcp(settings, sessionmaker, embedder)
     mcp_asgi = mcp.streamable_http_app(transport_security=transport_security(settings))
     static_dir = Path(settings.static_dir) if settings.static_dir else None
     spa = SpaFiles(directory=static_dir, html=True) if static_dir and static_dir.is_dir() else None

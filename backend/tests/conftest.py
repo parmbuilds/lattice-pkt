@@ -81,6 +81,8 @@ def settings(pg: dict[str, str]) -> Settings:
         public_origin="http://127.0.0.1:8000",
         insecure_dev_cookies=True,
         embedder="fake",
+        # Fake-embedder similarity is shared word buckets: any shared word counts as close.
+        vector_distance_floor=0.9,
         derive_inline=True,  # ASGITransport never runs the lifespan, so no worker (KTD3)
     )
 

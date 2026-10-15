@@ -398,6 +398,8 @@ class Chunk(Base):
         ),
         # Exact distance only (KTD6): this index serves the join, not the ranking.
         Index("chunks_version_config_idx", "version_id", "config_hash"),
+        # Lets vector search compute distances for one workspace's chunks, not the whole table.
+        Index("chunks_workspace_config_idx", "workspace_id", "config_hash"),
     )
 
 

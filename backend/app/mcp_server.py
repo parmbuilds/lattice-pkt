@@ -4,6 +4,7 @@ This is a demo adapter: bearer-header compatible, but not MCP 2025-11-25 OAuth-p
 interoperable, because no authorization server issues the tokens.
 """
 
+import hashlib
 import logging
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -24,11 +25,12 @@ from app import security
 from app.audit import NOT_FOUND_DETAIL, record
 from app.auth import load_subject
 from app.config import Settings
+from app.embedding import Embedder
 from app.models import AccessToken as TokenRow
 from app.models import DocumentVersion, Membership, User, VersionDecision
 from app.policy import Action, Subject, decide
 from app.services import documents as docs
-from app.services.search import returned_ids, search
+from app.services.search import returned_ids, returned_spans, search
 
 log = logging.getLogger("lattice.mcp")
 
@@ -39,7 +41,10 @@ DATA_NOTE = (
     "Every item was approved by a workspace admin or owner."
 )
 # Declared parameters per tool; anything else a client sends is dropped and audited (AE7).
-DECLARED = {"search_knowledge": {"query", "limit"}, "get_evidence": {"version_id"}}
+DECLARED = {
+    "search_knowledge": {"query", "limit"},
+    "get_evidence": {"version_id", "start", "end"},
+}
 
 _overrides: ContextVar[dict[str, Any] | None] = ContextVar("lattice_overrides", default=None)
 
@@ -145,7 +150,9 @@ def _audit_detail(**fields) -> dict:
     return fields | ({"attempted_overrides": extra} if extra else {})
 
 
-def build_mcp(settings: Settings, sessionmaker: async_sessionmaker) -> MCPServer:
+def build_mcp(
+    settings: Settings, sessionmaker: async_sessionmaker, embedder: Embedder
+) -> MCPServer:
     mcp = MCPServer(
         "Lattice",
         instructions=(
@@ -163,20 +170,27 @@ def build_mcp(settings: Settings, sessionmaker: async_sessionmaker) -> MCPServer
         """Search the approved documents you may read in your workspace.
 
         Only approved, non-withdrawn versions are returned; drafts never are. `limit` is
-        clamped to 1-20. Snippets mark matched words as [[like this]]. Pass a result's
-        version_id to get_evidence for the full text.
+        clamped to 1-20. Snippets mark matched words as [[like this]]. Each result has up to
+        three evidence `spans` (start, end, sha256 of that slice of the body); `retrieval` is
+        "hybrid" (keywords and meaning) or "lexical" (keywords only). Pass a result's
+        version_id, and optionally a span's start and end, to get_evidence for the text.
         """
         async with sessionmaker() as db, db.begin():
             subject = await _subject(db)
             decision = decide(subject, Action.SEARCH)
             limit = max(1, min(limit, cap))
-            results = await search(db, subject, query, limit)
+            results = await search(db, subject, query, limit, embedder, settings)
             await record(
                 db,
                 subject,
                 decision,
                 returned_version_ids=returned_ids(results),
-                detail=_audit_detail(query=query, limit=limit, count=len(results)),
+                detail=_audit_detail(
+                    query=query,
+                    limit=limit,
+                    count=len(results),
+                    returned_spans=returned_spans(results),
+                ),
             )
         # Committed before anything is returned (KTD8).
         return {
@@ -188,6 +202,8 @@ def build_mcp(settings: Settings, sessionmaker: async_sessionmaker) -> MCPServer
                     "version_id": r["version_id"],
                     "title": r["title"],
                     "snippet": r["snippet"],
+                    "spans": r["spans"],
+                    "retrieval": r["retrieval"],
                     "approved_by": r["approved_by"],
                     "approved_at": r["approved_at"],
                 }
@@ -196,14 +212,18 @@ def build_mcp(settings: Settings, sessionmaker: async_sessionmaker) -> MCPServer
         }
 
     @mcp.tool()
-    async def get_evidence(version_id: str) -> dict:
-        """Fetch the full text of one approved version returned by search_knowledge.
+    async def get_evidence(
+        version_id: str, start: int | None = None, end: int | None = None
+    ) -> dict:
+        """Fetch the text of one approved version returned by search_knowledge.
 
-        Only a document's current approved version works; any other id is reported as not found.
+        Without start and end this is the full body; with both, exactly body[start:end], such as
+        a span from a search result. Only a document's current approved version works; any other
+        id, or a span outside the body, is reported as not found.
         """
         async with sessionmaker() as db, db.begin():
             subject = await _subject(db)
-            evidence = await _evidence(db, subject, version_id)
+            evidence = await _evidence(db, subject, version_id, start, end)
         if evidence is None:  # a ToolError reaches the agent; other errors are masked as crashes
             raise ToolError(NOT_FOUND)
         return evidence
@@ -211,8 +231,10 @@ def build_mcp(settings: Settings, sessionmaker: async_sessionmaker) -> MCPServer
     return mcp
 
 
-async def _evidence(db: AsyncSession, subject: Subject, version_id: str) -> dict | None:
-    """Only the serving version of a retrievable document; every other id looks missing."""
+async def _evidence(
+    db: AsyncSession, subject: Subject, version_id: str, start: int | None, end: int | None
+) -> dict | None:
+    """Only the serving version of a retrievable document; every other id or span looks missing."""
     try:
         vid = UUID(version_id)
     except ValueError:
@@ -222,17 +244,29 @@ async def _evidence(db: AsyncSession, subject: Subject, version_id: str) -> dict
         return None
     doc, state = await docs.load(db, subject, version.document_id)
     decision = decide(subject, Action.RETRIEVE, docs.for_version(doc, state, vid))
+    if start is None and end is None:
+        start, end = 0, len(version.body)
+    returned = (
+        decision.allowed
+        and start is not None
+        and end is not None
+        and 0 <= start < end <= len(version.body)
+    )
     await record(
         db,
         subject,
         decision,
         document_id=doc.id,
         version_id=vid,
-        returned_version_ids=[vid] if decision.allowed else None,
-        detail=_audit_detail(version_id=version_id),
+        returned_version_ids=[vid] if returned else None,
+        detail=_audit_detail(
+            version_id=version_id,
+            **({"returned_spans": [[str(vid), start, end]]} if returned else {}),
+        ),
     )
-    if not decision.allowed:
+    if not returned:
         return None
+    text = version.body[start:end]
     approval = (
         await db.execute(
             select(VersionDecision.created_at, User.display_name)
@@ -246,7 +280,8 @@ async def _evidence(db: AsyncSession, subject: Subject, version_id: str) -> dict
         "document_id": str(doc.id),
         "version_id": str(vid),
         "title": version.title,
-        "body": version.body,
+        "body": text,
+        "span": {"start": start, "end": end, "sha256": hashlib.sha256(text.encode()).hexdigest()},
         "approved_by": approval[1] if approval else None,
         "approved_at": approval[0].isoformat() if approval else None,
     }
