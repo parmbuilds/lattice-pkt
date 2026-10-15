@@ -91,9 +91,7 @@ class Membership(Base):
 class Group(Base):
     __tablename__ = "groups"
     id: Mapped[uuid.UUID] = _id()
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE")
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()
     __table_args__ = (
@@ -126,9 +124,7 @@ class GroupMember(Base):
 class Document(Base):
     __tablename__ = "documents"
     id: Mapped[uuid.UUID] = _id()
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE")
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
     author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     serving_version_id: Mapped[uuid.UUID | None]
     pending_version_id: Mapped[uuid.UUID | None]
@@ -244,9 +240,7 @@ class DocumentGrant(Base):
 class Invite(Base):
     __tablename__ = "invites"
     id: Mapped[uuid.UUID] = _id()
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE")
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(Text)
     inviter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     prefix: Mapped[str] = mapped_column(Text, unique=True)
@@ -256,9 +250,7 @@ class Invite(Base):
     revoked_at: Mapped[datetime | None]
     accepted_at: Mapped[datetime | None]
     accepted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
-    __table_args__ = (
-        CheckConstraint("role IN ('admin', 'member')", name="invites_role_check"),
-    )
+    __table_args__ = (CheckConstraint("role IN ('admin', 'member')", name="invites_role_check"),)
 
 
 class AccessToken(Base):
@@ -266,9 +258,7 @@ class AccessToken(Base):
 
     __tablename__ = "access_tokens"
     id: Mapped[uuid.UUID] = _id()
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE")
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(Text)
     prefix: Mapped[str] = mapped_column(Text, unique=True)

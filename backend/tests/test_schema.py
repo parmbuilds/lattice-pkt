@@ -119,9 +119,7 @@ def test_serving_pointer_cannot_reference_another_documents_version(db):
     doc_a, _ = _document_with_version(db, ws, user)
     _, version_b = _document_with_version(db, ws, user)
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
-        db.execute(
-            "UPDATE documents SET serving_version_id = %s WHERE id = %s", (version_b, doc_a)
-        )
+        db.execute("UPDATE documents SET serving_version_id = %s WHERE id = %s", (version_b, doc_a))
 
 
 def test_a_grant_names_exactly_one_subject(db):
