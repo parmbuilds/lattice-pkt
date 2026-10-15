@@ -56,13 +56,13 @@ class GuardMiddleware:
         if scope["path"].startswith("/api"):
             headers = {k.decode().lower(): v.decode() for k, v in scope["headers"]}
             if headers.get("authorization", "").lower().startswith("bearer"):
-                return await _reject(send_with_headers, 401, "Bearer tokens are for /mcp only.")
+                return await reject(send_with_headers, 401, "Bearer tokens are for /mcp only.")
             if scope["method"] not in SAFE_METHODS and headers.get("origin") != self.origin:
-                return await _reject(send_with_headers, 403, "Cross-origin request refused.")
+                return await reject(send_with_headers, 403, "Cross-origin request refused.")
         await self.app(scope, receive, send_with_headers)
 
 
-async def _reject(send, status: int, detail: str) -> None:
+async def reject(send, status: int, detail: str) -> None:
     body = json.dumps({"detail": detail}).encode()
     await send(
         {

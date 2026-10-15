@@ -144,6 +144,7 @@ async def decide_draft(
     decision: str,
     config_hash: str,
     reason: str | None = None,
+    acknowledged_receipt: str | None = None,
 ) -> None:
     """Approve, reject or discard the named draft, only if it is still the pending one (R16).
 
@@ -177,6 +178,7 @@ async def decide_draft(
             decision=decision,
             actor_id=subject.user_id,
             reason=(reason or "").strip()[:500] or None,
+            acknowledged_receipt_sha256=acknowledged_receipt,
         )
     )
     await db.flush()

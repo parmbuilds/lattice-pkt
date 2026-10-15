@@ -266,6 +266,84 @@ def g_create_document(ctx: Ctx) -> None:
     }
 
 
+UPLOADED = b"Who is on call."  # a clean Markdown file: extracted unchanged, no flags
+
+
+def uploaded(ctx: Ctx, version: dict) -> None:
+    """An accepted upload: its permanent intake, then its purgeable payload (KTD11, KTD13)."""
+    (intake,), (payload,) = ctx.changes.added["intakes"], ctx.changes.added["intake_payloads"]
+    assert (
+        intake["outcome"],
+        intake["document_id"],
+        intake["version_id"],
+        intake["actor_id"],
+        intake["filename"],
+        intake["detected_type"],
+        intake["source_sha256"],
+    ) == (
+        "accepted",
+        version["document_id"],
+        version["id"],
+        ctx.id(ctx.actor),
+        "rota.md",
+        "md",
+        sha256(UPLOADED).hexdigest(),
+    )
+    assert (payload["intake_id"], payload["version_id"], payload["original"]) == (
+        intake["id"],
+        version["id"],
+        UPLOADED.hex(),
+    )
+    assert payload["hidden_excerpts"] == ()
+
+
+def g_upload(ctx: Ctx) -> None:
+    only(
+        ctx.changes,
+        "documents",
+        "document_versions",
+        "derivations",
+        "chunks",
+        "intakes",
+        "intake_payloads",
+    )
+    (doc,), (version,) = ctx.changes.added["documents"], ctx.changes.added["document_versions"]
+    derived_once(ctx, version)
+    uploaded(ctx, version)
+    assert doc["author_id"] == version["created_by"] == ctx.id(ctx.actor)
+    assert (version["title"], version["body"]) == ("rota", UPLOADED.decode())
+    assert ctx.body == {
+        "id": doc["id"],
+        "author_id": ctx.id(ctx.actor),
+        "withdrawn": False,
+        "serving_version_id": None,
+        "pending_version_id": version["id"],
+        "created": True,
+    }
+
+
+def g_upload_version(ctx: Ctx) -> None:
+    only(
+        ctx.changes,
+        "documents",
+        "document_versions",
+        "derivations",
+        "chunks",
+        "intakes",
+        "intake_payloads",
+    )
+    shared = ctx.world.docs["shared"]
+    (version,) = ctx.changes.added["document_versions"]
+    derived_once(ctx, version)
+    uploaded(ctx, version)
+    # With no title field, a new version keeps its document's current title.
+    assert (version["title"], version["body"]) == ("Checkout runbook v2", UPLOADED.decode())
+    old, new = updated_one(ctx, "documents")
+    assert (old["pending_version_id"], new["pending_version_id"]) == (shared["v2"], version["id"])
+    assert new["serving_version_id"] == shared["v1"]
+    assert (ctx.body["pending_version_id"], ctx.body["created"]) == (version["id"], True)
+
+
 def g_get_document(ctx: Ctx) -> None:
     unchanged(ctx)
     shared = ctx.world.docs["shared"]
@@ -325,6 +403,8 @@ def g_review(ctx: Ctx) -> None:
     assert ctx.body["title"] == "Checkout runbook v2"
     assert "-Restart the checkout pods." in ctx.body["diff"]
     assert "+Drain checkout." in ctx.body["diff"]
+    assert (ctx.body["receipt"], ctx.body["intake"]) == (None, None)  # typed, not uploaded
+    assert ctx.body["derivation"] == {"status": "ready", "error": None}
 
 
 def g_decision(kind: str, reason: str | None = None) -> Callable[[Ctx], None]:
@@ -337,7 +417,8 @@ def g_decision(kind: str, reason: str | None = None) -> Callable[[Ctx], None]:
             decision["version_id"],
             decision["actor_id"],
             decision["reason"],
-        ) == (kind, shared["v2"], ctx.id(ctx.actor), reason)
+            decision["acknowledged_receipt_sha256"],  # typed drafts have no receipt
+        ) == (kind, shared["v2"], ctx.id(ctx.actor), reason, None)
         _old, new = updated_one(ctx, "documents")
         serving = shared["v2"] if kind == "approved" else shared["v1"]
         assert (new["serving_version_id"], new["pending_version_id"]) == (serving, None)

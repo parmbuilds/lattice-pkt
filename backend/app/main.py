@@ -23,6 +23,7 @@ from app.routers import search as search_routes
 from app.routers import tokens as token_routes
 from app.routers import workspaces as workspace_routes
 from app.services.derive import run_worker
+from app.services.intake import UploadGate
 
 
 class SpaFiles(StaticFiles):
@@ -84,6 +85,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
     app.state.embedder = embedder
+    # Added first so it runs inside the guard: the bearer and Origin checks still come first.
+    app.add_middleware(UploadGate, settings=settings)
     app.add_middleware(GuardMiddleware, settings=settings)
     for module in (
         auth_routes,

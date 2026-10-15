@@ -1,7 +1,10 @@
+import hashlib
 from dataclasses import replace
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, desc, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -10,17 +13,20 @@ from sqlalchemy.exc import IntegrityError
 from app.audit import authorize, not_found
 from app.auth import Member
 from app.db import DB
+from app.ingest import Limits, Rejected, runner
 from app.models import (
     Derivation,
     Document,
     DocumentGrant,
     DocumentVersion,
     Group,
+    IntakePayload,
     User,
     VersionDecision,
 )
 from app.policy import Action, decide, read_clause
 from app.services import documents as svc
+from app.services import intake
 from app.services.derive import config_hash
 from app.services.workspaces import membership
 
@@ -35,6 +41,7 @@ class DocumentBody(BaseModel):
 class VersionRef(BaseModel):
     version_id: UUID
     reason: str | None = None
+    acknowledged_receipt: str | None = None  # the receipt sha256 the approver reviewed (R9)
 
 
 class NewAuthor(BaseModel):
@@ -62,6 +69,77 @@ async def create_document(body: DocumentBody, request: Request, subject: Member,
     # Starts unshared (R11).
     version = await svc.new_draft(db, subject, doc, title, text, app.embedder, app.settings)
     return _summary(doc, serving=None, pending=version.id)
+
+
+@router.post("/upload", status_code=201)
+async def upload(
+    request: Request,
+    response: Response,
+    subject: Member,
+    db: DB,
+    file: UploadFile,
+    title: Annotated[str | None, Form()] = None,
+    document_id: Annotated[UUID | None, Form()] = None,
+    new_document: Annotated[bool, Form()] = False,
+) -> dict:
+    """A file becomes a draft through the typed path (R1-R6). `intake.UploadGate` has already
+    checked the session cookie, the in-flight cap and the byte limit (KTD11)."""
+    app = request.app.state
+    data, filename = await file.read(), file.filename or ""
+    digest = hashlib.sha256(data).hexdigest()
+    doc = None
+    if document_id:  # a new version follows the edit rules
+        doc, state = await svc.load(db, subject, document_id)
+        await authorize(db, subject, Action.EDIT, state)
+    else:
+        await authorize(db, subject, Action.CREATE_DOCUMENT)
+    try:
+        extraction = await runner.extract_in_child(
+            data, filename, Limits.from_settings(app.settings)
+        )
+    except Rejected as error:
+        raise await intake.rejected(
+            db, subject, filename, digest, error.reason, error.status
+        ) from None
+    body = extraction.body
+    if not 1 <= len(body) <= svc.MAX_BODY:
+        reason = "body_too_long" if body else "no_text"
+        raise await intake.rejected(db, subject, filename, digest, reason, 422)
+    if doc is None:
+        title = intake.clean_title(title) if title is not None else intake.filename_title(filename)
+        if existing := await intake.duplicate_of(db, subject, digest):
+            response.status_code = 200
+            pending, serving = existing.pending_version_id, existing.serving_version_id
+            return _summary(existing, serving=serving, pending=pending) | {"created": False}
+        if not new_document and (existing := await intake.titled(db, subject, title)):
+            return JSONResponse(  # offered as a new version of it (R5)
+                {
+                    "detail": "You have a document with this title.",
+                    "suggest_document_id": str(existing.id),
+                },
+                status_code=409,
+            )
+    else:
+        title = intake.clean_title(
+            title if title is not None else await intake.current_title(db, doc)
+        )
+    title, body = svc.validate(title, body)
+    try:
+        # A savepoint, so a body too diverse to index can still be recorded as a rejection.
+        async with db.begin_nested():
+            if doc is None:
+                doc = Document(workspace_id=subject.workspace_id, author_id=subject.user_id)
+                db.add(doc)
+                await db.flush()
+            version = await svc.new_draft(db, subject, doc, title, body, app.embedder, app.settings)
+    except HTTPException as error:
+        if error is not svc.BODY_TOO_DIVERSE:
+            raise
+        raise await intake.rejected(
+            db, subject, filename, digest, "body_too_diverse", 422
+        ) from None
+    await intake.accepted(db, subject, version, filename, data, digest, extraction)
+    return _summary(doc, serving=doc.serving_version_id, pending=version.id) | {"created": True}
 
 
 @router.get("")
@@ -237,14 +315,25 @@ async def edit_document(
 
 
 @router.get("/{document_id}/review")
-async def review(document_id: UUID, subject: Member, db: DB) -> dict:
-    """The draft against the serving version, as raw text (R35, KTD11)."""
+async def review(document_id: UUID, request: Request, subject: Member, db: DB) -> dict:
+    """The draft against the serving version, as raw text (R35, KTD11), with the upload's
+    receipt and hidden excerpts (R8) and the draft's derivation status (R11)."""
     doc, state = await svc.load(db, subject, document_id)
     await authorize(db, subject, Action.REVIEW, state, version_id=doc.pending_version_id)
     draft = await db.get(DocumentVersion, doc.pending_version_id)
     serving = (
         await db.get(DocumentVersion, doc.serving_version_id) if doc.serving_version_id else None
     )
+    source = await intake.intake_of(db, draft.id)
+    payload = await db.get(IntakePayload, source.id) if source else None
+    derivation = (
+        await db.execute(
+            select(Derivation.status, Derivation.error).where(
+                Derivation.version_id == draft.id,
+                Derivation.config_hash == config_hash(request.app.state.embedder),
+            )
+        )
+    ).first()
     return {
         "document_id": str(doc.id),
         "pending_version_id": str(draft.id),
@@ -252,6 +341,24 @@ async def review(document_id: UUID, subject: Member, db: DB) -> dict:
         "author_id": str(doc.author_id),
         "title": svc.escape_invisible(draft.title),
         "diff": svc.review_diff(serving.body if serving else None, draft.body),
+        "receipt": source.receipt
+        | {"sha256": source.receipt_sha256, "hidden_excerpts": payload.hidden_excerpts}
+        if source
+        else None,
+        "intake": {
+            "id": str(source.id),
+            "filename": svc.escape_invisible(source.filename),
+            "detected_type": source.detected_type,
+            "parser": source.parser,
+            "parser_version": source.parser_version,
+            "source_sha256": source.source_sha256,
+        }
+        if source
+        else None,
+        # No row yet means the worker will enqueue it.
+        "derivation": {"status": derivation.status, "error": derivation.error}
+        if derivation
+        else {"status": "pending", "error": None},
     }
 
 
@@ -272,8 +379,20 @@ async def _decide_draft(
         if action is Action.APPROVE
         else None,
     )
+    acknowledged = (
+        await intake.check_acknowledged(db, version.id, body.acknowledged_receipt)
+        if action is Action.APPROVE
+        else None
+    )
     await svc.decide_draft(
-        db, subject, doc, version.id, decision, config_hash(request.app.state.embedder), body.reason
+        db,
+        subject,
+        doc,
+        version.id,
+        decision,
+        config_hash(request.app.state.embedder),
+        body.reason,
+        acknowledged,
     )
     return version
 

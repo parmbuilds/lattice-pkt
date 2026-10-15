@@ -18,6 +18,7 @@ from tests.endpoint_grounds import (
     EVERY_MEMBER,
     MANAGERS,
     NOT_FOUND,
+    UPLOADED,
     Ctx,
     g_add_to_group,
     g_audit,
@@ -46,6 +47,8 @@ from tests.endpoint_grounds import (
     g_tokens,
     g_transfer,
     g_unshare,
+    g_upload,
+    g_upload_version,
     g_version,
     g_withdraw,
     unchanged,
@@ -74,6 +77,7 @@ class Case:
     action: str
     ground: Callable[[Ctx], None]
     audited_when_allowed: Callable[[str], bool] = lambda actor: True
+    multipart: bool = False  # the request body is httpx `files`, not JSON
 
 
 # --- The matrix -----------------------------------------------------------------------------
@@ -238,6 +242,31 @@ CASES = [
         201,
         "create_document",
         g_create_document,
+    ),
+    Case(
+        "upload a document",
+        "POST",
+        W + "/documents/upload",
+        lambda w, a: (w.url("/documents/upload"), {"file": ("rota.md", UPLOADED)}),
+        EVERY_MEMBER,
+        201,
+        "create_document",
+        g_upload,
+        multipart=True,
+    ),
+    Case(
+        "upload a new version",
+        "POST",
+        W + "/documents/upload",
+        lambda w, a: (
+            w.url("/documents/upload"),
+            {"file": ("rota.md", UPLOADED), "document_id": (None, w.docs["shared"]["id"])},
+        ),
+        {"author"},
+        201,
+        "edit",
+        g_upload_version,
+        multipart=True,
     ),
     Case(
         "view a shared document",
@@ -434,7 +463,8 @@ async def test_endpoint(case: Case, actor: str, settings, pg, app):
     async with build_world(settings, pg, app) as world:
         path, body = case.request(world, actor)
         before, audit_from = snapshot(pg, world), last_audit_id(pg)
-        response = await world.clients[actor].request(case.method, path, json=body)
+        sent = {"files": body} if case.multipart else {"json": body}
+        response = await world.clients[actor].request(case.method, path, **sent)
         changes = diff(before, snapshot(pg, world))
         audit = audit_rows(pg, world.ws, audit_from)
 
