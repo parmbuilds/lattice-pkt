@@ -105,7 +105,8 @@ async def _ok(response: httpx.Response) -> dict:
 
 async def seed(settings: Settings) -> dict | None:
     """Create the demo workspace; returns its summary, or None if already seeded."""
-    app = create_app(settings)
+    # Derive in each request: the seed never runs the lifespan worker (KTD3).
+    app = create_app(settings.model_copy(update={"derive_inline": True}))
     clients: dict[str, httpx.AsyncClient] = {}
     try:
         async with httpx.AsyncClient(

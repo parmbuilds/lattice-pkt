@@ -1,7 +1,7 @@
 from dataclasses import replace
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, desc, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -10,9 +10,18 @@ from sqlalchemy.exc import IntegrityError
 from app.audit import authorize, not_found
 from app.auth import Member
 from app.db import DB
-from app.models import Document, DocumentGrant, DocumentVersion, Group, User, VersionDecision
+from app.models import (
+    Derivation,
+    Document,
+    DocumentGrant,
+    DocumentVersion,
+    Group,
+    User,
+    VersionDecision,
+)
 from app.policy import Action, decide, read_clause
 from app.services import documents as svc
+from app.services.derive import config_hash
 from app.services.workspaces import membership
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/documents", tags=["documents"])
@@ -43,13 +52,15 @@ def _summary(doc: Document, *, serving: UUID | None, pending: UUID | None) -> di
 
 
 @router.post("", status_code=201)
-async def create_document(body: DocumentBody, subject: Member, db: DB) -> dict:
+async def create_document(body: DocumentBody, request: Request, subject: Member, db: DB) -> dict:
     title, text = svc.validate(body.title, body.body)
     await authorize(db, subject, Action.CREATE_DOCUMENT)
     doc = Document(workspace_id=subject.workspace_id, author_id=subject.user_id)
     db.add(doc)
     await db.flush()
-    version = await svc.new_draft(db, subject, doc, title, text)  # starts unshared (R11)
+    app = request.app.state
+    # Starts unshared (R11).
+    version = await svc.new_draft(db, subject, doc, title, text, app.embedder, app.settings)
     return _summary(doc, serving=None, pending=version.id)
 
 
@@ -128,7 +139,7 @@ async def list_documents(subject: Member, db: DB) -> dict:
 
 
 @router.get("/{document_id}")
-async def get_document(document_id: UUID, subject: Member, db: DB) -> dict:
+async def get_document(document_id: UUID, request: Request, subject: Member, db: DB) -> dict:
     doc, state = await svc.load(db, subject, document_id)
     # A discarded first draft leaves no serving or pending version; fall back to history.
     primary = (
@@ -186,6 +197,20 @@ async def get_document(document_id: UUID, subject: Member, db: DB) -> dict:
             if last
             else None
         )
+        # Derivation status of the current versions; no row yet means the worker will enqueue it.
+        current = [v for v in (doc.pending_version_id, doc.serving_version_id) if v]
+        rows = {
+            vid: {"status": status, "error": error}
+            for vid, status, error in await db.execute(
+                select(Derivation.version_id, Derivation.status, Derivation.error).where(
+                    Derivation.version_id.in_(current),
+                    Derivation.config_hash == config_hash(request.app.state.embedder),
+                )
+            )
+        }
+        result["derivations"] = {
+            str(vid): rows.get(vid, {"status": "pending", "error": None}) for vid in current
+        }
     return result
 
 
@@ -200,11 +225,14 @@ async def get_version(document_id: UUID, version_id: UUID, subject: Member, db: 
 
 
 @router.put("/{document_id}")
-async def edit_document(document_id: UUID, body: DocumentBody, subject: Member, db: DB) -> dict:
+async def edit_document(
+    document_id: UUID, body: DocumentBody, request: Request, subject: Member, db: DB
+) -> dict:
     title, text = svc.validate(body.title, body.body)
     doc, state = await svc.load(db, subject, document_id)
     await authorize(db, subject, Action.EDIT, state)
-    version = await svc.new_draft(db, subject, doc, title, text)
+    app = request.app.state
+    version = await svc.new_draft(db, subject, doc, title, text, app.embedder, app.settings)
     return _summary(doc, serving=doc.serving_version_id, pending=version.id)
 
 
@@ -228,7 +256,7 @@ async def review(document_id: UUID, subject: Member, db: DB) -> dict:
 
 
 async def _decide_draft(
-    document_id, body: VersionRef, subject, db, action, decision
+    document_id, body: VersionRef, request: Request, subject, db, action, decision
 ) -> DocumentVersion:
     doc, state = await svc.load(db, subject, document_id)
     version = await svc.version_of(db, doc, body.version_id)
@@ -244,24 +272,34 @@ async def _decide_draft(
         if action is Action.APPROVE
         else None,
     )
-    await svc.decide_draft(db, subject, doc, version.id, decision, body.reason)
+    await svc.decide_draft(
+        db, subject, doc, version.id, decision, config_hash(request.app.state.embedder), body.reason
+    )
     return version
 
 
 @router.post("/{document_id}/approve")
-async def approve(document_id: UUID, body: VersionRef, subject: Member, db: DB) -> dict:
-    version = await _decide_draft(document_id, body, subject, db, Action.APPROVE, "approved")
+async def approve(
+    document_id: UUID, body: VersionRef, request: Request, subject: Member, db: DB
+) -> dict:
+    version = await _decide_draft(
+        document_id, body, request, subject, db, Action.APPROVE, "approved"
+    )
     return {"serving_version_id": str(version.id)}
 
 
 @router.post("/{document_id}/reject", status_code=204)
-async def reject(document_id: UUID, body: VersionRef, subject: Member, db: DB) -> None:
-    await _decide_draft(document_id, body, subject, db, Action.REJECT, "rejected")
+async def reject(
+    document_id: UUID, body: VersionRef, request: Request, subject: Member, db: DB
+) -> None:
+    await _decide_draft(document_id, body, request, subject, db, Action.REJECT, "rejected")
 
 
 @router.post("/{document_id}/discard", status_code=204)
-async def discard(document_id: UUID, body: VersionRef, subject: Member, db: DB) -> None:
-    await _decide_draft(document_id, body, subject, db, Action.DISCARD, "discarded")
+async def discard(
+    document_id: UUID, body: VersionRef, request: Request, subject: Member, db: DB
+) -> None:
+    await _decide_draft(document_id, body, request, subject, db, Action.DISCARD, "discarded")
 
 
 @router.post("/{document_id}/withdraw", status_code=204)

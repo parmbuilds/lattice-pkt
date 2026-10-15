@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -21,6 +22,7 @@ from app.routers import groups as group_routes
 from app.routers import search as search_routes
 from app.routers import tokens as token_routes
 from app.routers import workspaces as workspace_routes
+from app.services.derive import run_worker
 
 
 class SpaFiles(StaticFiles):
@@ -67,10 +69,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # A mounted sub-app's lifespan does not run, so the host runs the MCP session manager.
+        worker = asyncio.create_task(run_worker(sessionmaker, app.state.embedder, settings))
         try:
             async with mcp.session_manager.run():
                 yield
         finally:
+            worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker
             await engine.dispose()
 
     app = FastAPI(title="Lattice", lifespan=lifespan, docs_url=None, redoc_url=None)

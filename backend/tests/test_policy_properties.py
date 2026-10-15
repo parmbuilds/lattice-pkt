@@ -27,6 +27,7 @@ import app.policy as policy_module
 from app.auth import load_subject
 from app.main import create_app
 from app.policy import Action, DocumentState, decide, readable_versions
+from app.services.documents import DERIVATIONS_NOT_READY
 from app.services.search import search
 from tests import reference_model as ref
 from tests.conftest import plain_dsn
@@ -50,6 +51,8 @@ class PolicyMachine(RuleBasedStateMachine):
         self.user_ids: dict[str, uuid.UUID] = {}
         self.docs: dict[uuid.UUID, dict] = {}  # document id -> {"ws", "author", "pending"}
         self.ws: dict[str, uuid.UUID] = {}
+        # Versions derived at the current config: drafts derive in their request (derive_inline).
+        self.ready: set[uuid.UUID] = set()
 
     # --- plumbing --------------------------------------------------------------------------
 
@@ -154,6 +157,7 @@ class PolicyMachine(RuleBasedStateMachine):
         ).json()
         doc_id, version = uuid.UUID(created["id"]), uuid.UUID(created["pending_version_id"])
         self.docs[doc_id] = {"ws": ws, "pending": version}
+        self.ready.add(version)
         self.world.documents[doc_id] = {
             "workspace": self.ws[ws],
             "author": self.user_ids[author],
@@ -198,6 +202,7 @@ class PolicyMachine(RuleBasedStateMachine):
         assert response.status_code == 200, response.text
         version = uuid.UUID(response.json()["pending_version_id"])
         self.docs[doc_id]["pending"] = version
+        self.ready.add(version)
         self.world.documents[doc_id]["versions"].add(version)
 
     @precondition(lambda self: self.docs)
@@ -215,10 +220,23 @@ class PolicyMachine(RuleBasedStateMachine):
                 json={"version_id": str(pending)},
             )
         )
+        if decision == "approve" and pending not in self.ready:
+            # Approve waits for a derivation at the current config, and changes nothing (R10).
+            assert (response.status_code, response.json()) == (
+                409,
+                {"detail": DERIVATIONS_NOT_READY.detail},
+            ), response.text
+            return
         assert response.status_code in (200, 204), response.text
         if decision == "approve":
             self.world.documents[doc_id]["serving"] = pending
         self.docs[doc_id]["pending"] = None
+
+    @rule()
+    def change_pipeline_config(self):
+        """A new model or chunker version: every existing derivation is out of date (R14)."""
+        self.app.state.embedder.config_identity = f"fake-{uuid.uuid4()}"
+        self.ready.clear()
 
     @precondition(lambda self: self.docs)
     @rule(data=st.data())

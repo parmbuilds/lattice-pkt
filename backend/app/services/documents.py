@@ -2,25 +2,32 @@
 
 import difflib
 import unicodedata
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
 from psycopg.errors import ProgramLimitExceeded
-from sqlalchemy import select, update
+from sqlalchemy import exists, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import not_found
-from app.models import Document, DocumentGrant, DocumentVersion, VersionDecision
+from app.config import Settings
+from app.embedding import Embedder
+from app.models import Derivation, Document, DocumentGrant, DocumentVersion, VersionDecision
 from app.policy import DocumentState, Subject
+from app.services import derive
 
 MAX_TITLE = 200
 MAX_BODY = 1_000_000
 
 STALE_DRAFT = HTTPException(409, "This draft was replaced or already decided. Reload and retry.")
 DOCUMENT_CHANGED = HTTPException(409, "The document changed. Reload and retry.")
+DERIVATIONS_NOT_READY = HTTPException(
+    409, "This draft is still being prepared for search. Try again shortly."
+)
 # body_too_diverse: Postgres caps a tsvector at 1 MB, which only very word-diverse bodies reach.
 BODY_TOO_DIVERSE = HTTPException(
     422, "This body has too many distinct words to index. Split it into smaller documents."
@@ -84,7 +91,13 @@ async def version_of(db: AsyncSession, doc: Document, version_id: UUID) -> Docum
 
 
 async def new_draft(
-    db: AsyncSession, subject: Subject, doc: Document, title: str, body: str
+    db: AsyncSession,
+    subject: Subject,
+    doc: Document,
+    title: str,
+    body: str,
+    embedder: Embedder,
+    settings: Settings,
 ) -> DocumentVersion:
     """Versions never change; an edit adds a version that replaces any pending draft (R17)."""
     version = DocumentVersion(
@@ -108,6 +121,18 @@ async def new_draft(
     )
     if result.rowcount == 0:
         raise DOCUMENT_CHANGED
+    db.add(
+        Derivation(
+            workspace_id=doc.workspace_id,
+            document_id=doc.id,
+            version_id=version.id,
+            config_hash=derive.config_hash(embedder),
+            status="pending",
+        )
+    )
+    await db.flush()
+    if settings.derive_inline:  # tests and the seed: ready before the request commits
+        await derive.derive(lambda: nullcontext(db), embedder, settings, version.id)
     return version
 
 
@@ -117,22 +142,32 @@ async def decide_draft(
     doc: Document,
     version_id: UUID,
     decision: str,
+    config_hash: str,
     reason: str | None = None,
 ) -> None:
-    """Approve, reject or discard the named draft, only if it is still the pending one (R16)."""
+    """Approve, reject or discard the named draft, only if it is still the pending one (R16).
+
+    Approve also needs the draft's derivation ready at the current config (KTD4, R10).
+    """
     values: dict = {"pending_version_id": None}
+    guards = [
+        Document.id == doc.id,
+        Document.pending_version_id == version_id,
+        Document.withdrawn_at.is_(None),
+    ]
     if decision == "approved":
         values["serving_version_id"] = version_id
-    result = await db.execute(
-        update(Document)
-        .where(
-            Document.id == doc.id,
-            Document.pending_version_id == version_id,
-            Document.withdrawn_at.is_(None),
+        guards.append(
+            exists().where(
+                Derivation.version_id == version_id,
+                Derivation.config_hash == config_hash,
+                Derivation.status == "ready",
+            )
         )
-        .values(**values)
-    )
+    result = await db.execute(update(Document).where(*guards).values(**values))
     if result.rowcount == 0:
+        if decision == "approved" and await db.scalar(select(Document.id).where(*guards[:3])):
+            raise DERIVATIONS_NOT_READY
         raise STALE_DRAFT
     db.add(
         VersionDecision(

@@ -107,6 +107,16 @@ async def approve(client: httpx.AsyncClient, workspace_id: str, document: dict) 
     response.raise_for_status()
 
 
+async def derive_all(app) -> list[uuid.UUID]:
+    """Run worker ticks until nothing is due; returns the versions derived, in order."""
+    from app.services.derive import tick
+
+    derived = []
+    while version := await tick(app.state.sessionmaker, app.state.embedder, app.state.settings):
+        derived.append(version)
+    return derived
+
+
 async def retrievable_ids(pg, workspace_id: str, uid: str) -> set[str]:
     """What the policy's retrieve predicate returns for a user right now (live role and groups)."""
     from sqlalchemy.ext.asyncio import create_async_engine

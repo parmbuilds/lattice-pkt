@@ -81,6 +81,7 @@ def settings(pg: dict[str, str]) -> Settings:
         public_origin="http://127.0.0.1:8000",
         insecure_dev_cookies=True,
         embedder="fake",
+        derive_inline=True,  # ASGITransport never runs the lifespan, so no worker (KTD3)
     )
 
 

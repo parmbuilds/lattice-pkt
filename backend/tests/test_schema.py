@@ -229,7 +229,8 @@ def test_deleting_a_derivation_deletes_its_chunks(db):
     _derivation(db, ws, doc, version)
     _chunk(db, ws, doc, version)
     db.execute("DELETE FROM derivations WHERE version_id = %s", (version,))
-    assert db.execute("SELECT count(*) FROM chunks").fetchone()[0] == 0
+    count = db.execute("SELECT count(*) FROM chunks WHERE version_id = %s", (version,))
+    assert count.fetchone()[0] == 0
 
 
 def test_an_intake_filename_is_at_most_256_characters(db):

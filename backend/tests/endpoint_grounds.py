@@ -235,9 +235,25 @@ def g_list_documents(ctx: Ctx) -> None:
         assert (d["author_id"], d["withdrawn"]) == (author, withdrawn)
 
 
+def derived_once(ctx: Ctx, version: dict) -> None:
+    """A new draft is chunked and embedded in its request (derive_inline): one span, ready."""
+    (derivation,), (chunk,) = ctx.changes.added["derivations"], ctx.changes.added["chunks"]
+    assert ctx.changes.removed["derivations"] == ctx.changes.removed["chunks"] == []
+    assert (derivation["version_id"], derivation["status"]) == (version["id"], "ready")
+    body = version["body"]
+    assert (chunk["version_id"], chunk["config_hash"], chunk["start"], chunk["end"]) == (
+        version["id"],
+        derivation["config_hash"],
+        0,
+        len(body),
+    )
+    assert chunk["sha256"] == sha256(body.encode()).hexdigest()
+
+
 def g_create_document(ctx: Ctx) -> None:
-    only(ctx.changes, "documents", "document_versions")
+    only(ctx.changes, "documents", "document_versions", "derivations", "chunks")
     (doc,), (version,) = ctx.changes.added["documents"], ctx.changes.added["document_versions"]
+    derived_once(ctx, version)
     assert doc["author_id"] == version["created_by"] == ctx.id(ctx.actor)
     assert (doc["serving_version_id"], doc["pending_version_id"]) == (None, version["id"])
     assert (version["title"], version["body"]) == ("Rota", "Who is on call.")
@@ -269,8 +285,11 @@ def g_get_document(ctx: Ctx) -> None:
             "reason": None,
             "version_id": shared["v1"],
         }
+        ready = {"status": "ready", "error": None}
+        assert ctx.body["derivations"] == {shared["v2"]: ready, shared["v1"]: ready}
     else:
         assert ctx.body["pending_version_id"] is None and "versions" not in ctx.body
+        assert "derivations" not in ctx.body
 
 
 def g_version(version: str) -> Callable[[Ctx], None]:
@@ -284,9 +303,10 @@ def g_version(version: str) -> Callable[[Ctx], None]:
 
 
 def g_edit(ctx: Ctx) -> None:
-    only(ctx.changes, "documents", "document_versions")
+    only(ctx.changes, "documents", "document_versions", "derivations", "chunks")
     shared = ctx.world.docs["shared"]
     (version,) = ctx.changes.added["document_versions"]
+    derived_once(ctx, version)
     assert ctx.changes.removed["document_versions"] == []  # v2 stays: versions are immutable
     assert (version["title"], version["created_by"]) == ("Runbook v3", ctx.id("author"))
     old, new = updated_one(ctx, "documents")
