@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { api, ApiError, errorText } from '../api'
+import { api, ApiError, errorText, NOT_FOUND } from '../api'
 import { type DocumentSummary, useAction, useLoad, useWorkspace } from '../session'
 import { LoadState, Message } from '../ui'
 
@@ -19,8 +19,8 @@ const staleRefusal = (e: unknown) =>
     : errorText(e)
 
 export default function Approvals() {
-  const { base } = useWorkspace()
-  const docs = useLoad<{ documents: DocumentSummary[] }>(`${base}/documents`)
+  const { base, manager } = useWorkspace()
+  const docs = useLoad<{ documents: DocumentSummary[] }>(manager ? `${base}/documents` : null)
   const { message, run } = useAction()
   const pending = docs.data?.documents.filter((d) => d.pending_version_id) ?? []
 
@@ -29,6 +29,9 @@ export default function Approvals() {
     await run(action, done, staleRefusal)
     docs.reload()
   }
+
+  // Reviewing is for owners and admins; a member's own drafts are on the Documents page.
+  if (!manager) return <><h1>Approvals</h1><Message text={NOT_FOUND} /></>
 
   return (
     <>
