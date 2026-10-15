@@ -225,3 +225,8 @@ __marimo__/
 # Frontend
 node_modules/
 frontend/dist/
+
+# Impeccable working files (screenshots, decision pages); briefs and design.json are tracked
+.impeccable/review/
+.impeccable/decision/
+.impeccable/questions/

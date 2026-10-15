@@ -105,6 +105,7 @@ npm ci
 npm run dev    # proxies /api and /mcp to http://127.0.0.1:8000
 npm test
 npm run build
+npm run e2e    # browser tests against the running stack (compose up + seed)
 ```
 
 Run the API locally against the Compose database with `LATTICE_INSECURE_DEV_COOKIES=true uv run uvicorn --factory app.main:create_app --reload` after `uv run alembic upgrade head`. Without a private `LATTICE_SECRET_PEPPER`, the app starts only in this local development mode; settings are read from `LATTICE_*` environment variables (see [`backend/app/config.py`](backend/app/config.py)).
@@ -118,7 +119,7 @@ backend/app/routers/       REST API
 backend/app/services/      document lifecycle, search, membership
 backend/app/mcp_server.py  MCP endpoint and token verification
 backend/app/seed.py        demo data
-frontend/src/              React UI
+frontend/src/              Vue UI (design system: DESIGN.md)
 db/init/01-roles.sql       database roles (owner for migrations, app for runtime)
 docs/plans/                requirements and implementation plan
 ```
