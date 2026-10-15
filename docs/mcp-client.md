@@ -31,8 +31,8 @@ Clients that connect to remote MCP servers **only through OAuth discovery** (for
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `search_knowledge` | `query` (text), `limit` (1-20, default 10) | Approved document versions you may read, ranked, each with a snippet (matches marked `[[like this]]`), its approver and approval time |
-| `get_evidence` | `version_id` | The full text of one approved, serving version you may read |
+| `search_knowledge` | `query` (text), `limit` (1-20, default 10) | Approved document versions you may read, ranked by keywords and embeddings together, each with a snippet (matches marked `[[like this]]`), its approver and approval time, up to three evidence `spans` (`start`, `end`, and the `sha256` of that slice of the body), and `retrieval` (`hybrid`, or `lexical` when the query could not be embedded) |
+| `get_evidence` | `version_id`, optional `start` and `end` | One approved, serving version you may read: the full body, or with both `start` and `end` exactly that slice, plus a `span` (`start`, `end`, `sha256`) so a span from search can be checked. Only one bound, or a range outside the body, gets "Not found or not permitted" |
 
 There are no other tools. Approving, sharing, inviting and managing tokens happen only in the web UI (R33), so a prompt-injected agent cannot approve content it planted, even with an admin's token.
 

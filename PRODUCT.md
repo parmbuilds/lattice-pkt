@@ -8,8 +8,7 @@ web
 
 ## Stack
 
-Current: React 19, Vite, react-router, plain CSS, served as a static SPA by the FastAPI app on the same origin (KTD12).
-Open decision: the user is open to Vue 3, Tailwind, Vuetify or Nuxt for the redesign. Not yet chosen.
+Current: Vue 3, Vite, vue-router, Tailwind 4, served as a static SPA by the FastAPI app on the same origin (KTD12).
 
 ## Users
 
@@ -44,10 +43,11 @@ Lattice is a governed knowledge store for AI agents. It lets an organisation mak
 ## Capabilities and Constraints
 
 - Implemented: workspaces, roles (owner, admin, member), invites, ownership transfer, groups, document versions, approve, reject, discard, withdraw, sharing, policy-filtered full-text search, MCP with personal access tokens, audit trail.
+- Implemented for ingestion and retrieval: upload of Markdown, text, HTML, text-layer PDF and DOCX files into drafts, each with an extraction receipt whose flags an approver must acknowledge by hash; a derivation ledger (chunks and embeddings per version) so approve waits until a draft is ready for search; purge receipts in the audit trail when a version stops serving and its derivatives are deleted; hybrid search (keywords plus embeddings, policy-filtered before ranking) with evidence spans an agent can check through `get_evidence`; an entity registry curated by managers and a query-time entity graph in the UI; a retrieval and lifecycle benchmark on the synthetic corpus.
 - Lifecycle terms: draft, approved, rejected, discarded, withdrawn (final). Edits create new drafts; the approved version keeps serving until a newer one is approved.
 - CSP: `default-src 'self'; script-src 'self'; style-src 'self'`. No inline styles and no runtime-injected style tags; styling must ship as bundled files.
 - The UI never decides access itself; it renders what the API returns. Role-gated navigation is presentation only.
-- Not built, do not show or imply: vector or hybrid retrieval, file ingestion, citations, OAuth for MCP, agent accounts, scoped delegation, folders, nested groups, SSO, password reset, email delivery, rate limiting, cloud deployment.
+- Not built, do not show or imply: OCR for scanned PDFs, an approximate vector index, LLM entity extraction or community reports, the graph over MCP, original-file download, zip or folder upload, OAuth for MCP, agent accounts, scoped delegation, folders, nested groups, SSO, password reset, email delivery, rate limiting, cloud deployment.
 
 ## Brand Commitments
 
@@ -58,7 +58,7 @@ Lattice is a governed knowledge store for AI agents. It lets an organisation mak
 
 - Seed data in `backend/app/seed.py` (synthetic, label it as such where it could be mistaken for real).
 - README and `docs/plans/2026-10-15-1207-feat-workspace-authorization-plan.md` (requirements R1-R35, acceptance examples AE1-AE11).
-- No customers, metrics, testimonials or benchmarks exist; do not invent them.
+- The only benchmark is the synthetic one in `backend/tests/benchmark/`. No customers, metrics or testimonials exist; do not invent them.
 
 ## Product Principles
 
