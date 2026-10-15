@@ -6,6 +6,8 @@ import LoadState from '../components/LoadState.vue'
 import Stamp from '../components/Stamp.vue'
 import StatusMessage from '../components/StatusMessage.vue'
 import {
+  type Derivation,
+  derivationStamp,
   type DocumentSummary,
   documentStamps,
   revLetter,
@@ -25,6 +27,8 @@ type Detail = DocumentSummary & {
   versions?: Version[]
   shared_with?: { id: string; name: string }[]
   last_decision?: { decision: string; reason: string | null; version_id: string } | null
+  derivations?: Record<string, Derivation>
+  intakes?: Record<string, { filename: string; detected_type: string | null; parser: string | null; version: string | null }>
 }
 
 const route = useRoute()
@@ -41,6 +45,8 @@ const rev = (id: string | null | undefined) => {
   const i = versions.value.findIndex((v) => v.id === id)
   return i < 0 ? '' : revLetter(i)
 }
+const derivation = computed(() => doc.value?.derivations?.[doc.value.shown_version_id])
+const intake = computed(() => doc.value?.intakes?.[doc.value.shown_version_id])
 const shownVersion = computed(() => versions.value.find((v) => v.id === doc.value?.shown_version_id))
 
 const serves = computed(() => {
@@ -87,6 +93,18 @@ const withdraw = () =>
   window.confirm('Withdraw this document? Withdrawal is permanent in this version.') &&
   act(() => api(`${path.value}/withdraw`, 'POST'), 'Document withdrawn.')
 
+// Uploading a new version (authors)
+const newFile = ref<HTMLInputElement | null>(null)
+async function uploadVersion() {
+  const picked = newFile.value?.files?.[0]
+  if (!picked) return
+  const form = new FormData()
+  form.append('file', picked)
+  form.append('document_id', doc.value!.id)
+  if (await act(() => api(`${w.base}/documents/upload`, 'POST', form), 'New version uploaded as a draft; it awaits approval.'))
+    newFile.value!.value = ''
+}
+
 // Earlier versions
 const viewing = ref<{ id: string; title: string; body: string } | null>(null)
 const view = (v: Version) =>
@@ -132,6 +150,7 @@ const reassign = () =>
         <h1>{{ doc.title }}</h1>
         <p class="mt-2 flex flex-wrap items-center gap-2 text-sm text-graphite">
           <Stamp v-for="s in documentStamps(doc)" :key="s.label" :kind="s.kind">{{ s.label }}</Stamp>
+          <Stamp v-if="derivation" :kind="derivationStamp(derivation).kind">{{ derivationStamp(derivation).label }}</Stamp>
           <span>
             {{
               doc.withdrawn
@@ -157,7 +176,7 @@ const reassign = () =>
       </div>
     </header>
 
-    <StatusMessage :text="message" />
+    <StatusMessage :text="route.query.uploaded === 'already' && !message ? 'This file was already uploaded; here is that document.' : message" />
 
     <div class="mt-4 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6">
@@ -224,6 +243,10 @@ const reassign = () =>
             <dt>Serves search and agents</dt>
             <dd>{{ serves }}</dd>
           </div>
+          <div v-if="intake" class="span">
+            <dt>Uploaded file</dt>
+            <dd>{{ intake.filename }} <span class="text-sm text-muted">({{ intake.detected_type }}, read by {{ intake.parser }} {{ intake.version }})</span></dd>
+          </div>
           <div v-if="doc.shared_with" class="span">
             <dt>Shared with</dt>
             <dd>{{ doc.shared_with.length ? doc.shared_with.map((g) => g.name).join(', ') : 'No groups' }}</dd>
@@ -286,6 +309,17 @@ const reassign = () =>
             <button type="submit" class="btn">Share</button>
           </form>
         </section>
+
+        <form v-if="author && !doc.withdrawn" class="grid gap-3" @submit.prevent="uploadVersion">
+          <h2>Upload new version</h2>
+          <div class="flex items-end gap-2">
+            <label class="field min-w-0 flex-1">
+              File
+              <input ref="newFile" class="input" type="file" accept=".md,.txt,.html,.pdf,.docx" required />
+            </label>
+            <button type="submit" class="btn">Upload</button>
+          </div>
+        </form>
 
         <form v-if="w.manager" class="grid gap-3" @submit.prevent="reassign">
           <h2>Authorship</h2>

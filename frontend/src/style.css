@@ -278,6 +278,14 @@
     color: var(--color-redline-ink);
     background: var(--color-redline-tint);
   }
+  .stamp-processing {
+    color: var(--color-graphite);
+    border-width: 1px;
+  }
+  .stamp-needs-ack {
+    color: var(--color-draft);
+    border-style: dashed;
+  }
 
   /* The title block: ruled cells, condensed caps labels, values below. */
   /* The ink shows through 1px gaps, so every rule is exact whatever cells span. */

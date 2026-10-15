@@ -37,4 +37,16 @@ describe('api', () => {
       'The draft was replaced or already decided.',
     )
   })
+
+  it('sends FormData as-is with no Content-Type but with X-CSRF-Token', async () => {
+    setCsrfToken('csrf-abc')
+    const fetchMock = mockFetch(201, { id: 'd1' })
+    const form = new FormData()
+    form.append('file', new File(['# Hi'], 'hi.md'))
+    await api('/api/x', 'POST', form)
+    const init = fetchMock.mock.calls[0][1]
+    expect(new Headers(init.headers).has('Content-Type')).toBe(false)
+    expect(new Headers(init.headers).get('X-CSRF-Token')).toBe('csrf-abc')
+    expect(init.body).toBe(form)
+  })
 })

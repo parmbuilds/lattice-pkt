@@ -50,7 +50,7 @@ for (const [who, manager] of [
     await expect(page.getByRole('heading', { name: 'Documents' })).toBeVisible()
     await expect(page.getByRole('table')).toBeVisible()
 
-    const pages = ['Documents', 'Search', 'Tokens', ...(manager ? ['Approvals', 'Members', 'Groups', 'Audit trail'] : [])]
+    const pages = ['Documents', 'Search', 'Entities', 'Tokens', ...(manager ? ['Approvals', 'Members', 'Groups', 'Audit trail'] : [])]
     for (const name of pages) {
       await nav(page, name).click()
       await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
@@ -218,4 +218,55 @@ test('a document goes through draft, approval, edit, rejection, sharing and with
 
   expect(ownerProblems).toEqual([])
   expect(memberProblems).toEqual([])
+})
+
+test('an uploaded Markdown file is approved, found by search and shown on its entity page', async ({ browser }) => {
+  const run = Date.now().toString(36)
+  const word = `quokkaflux${run}`
+  const { page, problems } = await newPage(browser)
+  await page.goto('/signup')
+  await page.getByLabel('Name').fill('E2E Uploader')
+  await page.getByLabel('Email').fill(`e2e-upload-${run}@lattice.test`)
+  await page.getByLabel('Password (8 or more characters)').fill('e2e-upload-password')
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.getByLabel('Workspace name').fill(`E2E upload ${run}`)
+  await page.getByRole('button', { name: 'Create workspace' }).click()
+  await expect(page).toHaveURL(/\/w\/[^/]+\/documents$/)
+
+  // Upload a Markdown file; it becomes a draft.
+  await page.getByRole('button', { name: 'Upload file' }).click()
+  await page.getByLabel('File').setInputFiles({
+    name: `runbook-${run}.md`,
+    mimeType: 'text/markdown',
+    buffer: Buffer.from(`# Upload runbook ${run}\n\nThe ${word} service restarts nightly.\n`),
+  })
+  await page.getByRole('button', { name: 'Upload', exact: true }).click()
+  await expect(page).toHaveURL(/\/documents\/[^/]+$/)
+
+  // Approve once the draft is ready for search.
+  await nav(page, 'Approvals').click()
+  const approve = page.getByRole('button', { name: 'Approve' })
+  await expect(async () => {
+    await page.reload()
+    await expect(approve).toBeEnabled({ timeout: 1000 })
+  }).toPass({ timeout: 30_000 })
+  await approve.click()
+  await expect(status(page)).toContainText('it is now the serving version')
+
+  await nav(page, 'Search').click()
+  await page.getByLabel('Search approved documents').fill(word)
+  await page.getByRole('button', { name: 'Search' }).click()
+  await expect(page.getByRole('link', { name: `runbook-${run}` }).or(page.getByRole('link', { name: `Upload runbook ${run}` }))).toBeVisible()
+
+  // Name the entity, then open its page.
+  await nav(page, 'Entities').click()
+  await page.getByLabel('Name').fill(word)
+  await page.getByRole('button', { name: 'Add entity' }).click()
+  await page.getByRole('link', { name: word }).click()
+  await expect(page.getByRole('heading', { level: 1, name: word })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Mentions' }).getByRole('link')).toHaveCount(1)
+  await expect(page.getByRole('region', { name: 'Mentions' })).toContainText(word)
+
+  expect(problems).toEqual([])
 })

@@ -13,7 +13,11 @@ type Result = {
   snippet: string
   approved_at: string
   approved_by: string | null
+  spans: { start: number; end: number; sha256: string }[]
+  retrieval: 'lexical' | 'hybrid'
 }
+
+const modes = { lexical: 'Keyword search', hybrid: 'Keyword and meaning search' }
 
 const w = useWorkspace()
 const query = ref('')
@@ -50,7 +54,8 @@ function submit() {
     />
     <template v-if="results.data?.results.length">
       <p class="mb-2 text-sm text-graphite">
-        {{ results.data.results.length }} {{ results.data.results.length === 1 ? 'result' : 'results' }} for “{{ submitted }}”
+        {{ results.data.results.length }} {{ results.data.results.length === 1 ? 'result' : 'results' }} for “{{ submitted }}” ·
+        {{ modes[results.data.results[0].retrieval] }}
       </p>
       <ol class="sheet divide-y divide-rule">
         <li v-for="r in results.data.results" :key="r.version_id" class="px-5 py-4">
@@ -59,6 +64,9 @@ function submit() {
           <p class="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
             <span class="stamp stamp-approved">Approved</span>
             <span>{{ when(r.approved_at) }}{{ r.approved_by ? ` by ${r.approved_by}` : '' }}</span>
+            <span v-if="r.spans.length">
+              · {{ r.spans.length }} evidence {{ r.spans.length === 1 ? 'span' : 'spans' }}, from character {{ r.spans[0].start }}
+            </span>
           </p>
         </li>
       </ol>

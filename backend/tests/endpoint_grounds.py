@@ -390,9 +390,10 @@ def g_get_document(ctx: Ctx) -> None:
         }
         ready = {"status": "ready", "error": None}
         assert ctx.body["derivations"] == {shared["v2"]: ready, shared["v1"]: ready}
+        assert ctx.body["intakes"] == {}  # the known world's documents were typed, not uploaded
     else:
         assert ctx.body["pending_version_id"] is None and "versions" not in ctx.body
-        assert "derivations" not in ctx.body
+        assert "derivations" not in ctx.body and "intakes" not in ctx.body
 
 
 def g_version(version: str) -> Callable[[Ctx], None]:

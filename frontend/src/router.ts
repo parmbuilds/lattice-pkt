@@ -3,6 +3,7 @@ import Approvals from './pages/Approvals.vue'
 import Audit from './pages/Audit.vue'
 import DocumentDetail from './pages/DocumentDetail.vue'
 import Documents from './pages/Documents.vue'
+import Entities from './pages/Entities.vue'
 import Groups from './pages/Groups.vue'
 import Invite from './pages/Invite.vue'
 import Members from './pages/Members.vue'
@@ -28,6 +29,8 @@ export const routes: RouteRecordRaw[] = [
       { path: 'documents', component: Documents },
       { path: 'documents/:documentId', component: DocumentDetail },
       { path: 'search', component: Search },
+      { path: 'entities', component: Entities },
+      { path: 'entities/:entityId', component: Entities },
       { path: 'tokens', component: Tokens },
       { path: 'approvals', component: Approvals },
       { path: 'members', component: Members },

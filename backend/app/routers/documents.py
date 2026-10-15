@@ -20,6 +20,7 @@ from app.models import (
     DocumentGrant,
     DocumentVersion,
     Group,
+    Intake,
     IntakePayload,
     User,
     VersionDecision,
@@ -288,6 +289,19 @@ async def get_document(document_id: UUID, request: Request, subject: Member, db:
         }
         result["derivations"] = {
             str(vid): rows.get(vid, {"status": "pending", "error": None}) for vid in current
+        }
+        # The intake record of current versions that came from an upload (R4); typed ones have none.
+        result["intakes"] = {
+            str(vid): {"filename": name, "detected_type": kind, "parser": parser, "version": pv}
+            for vid, name, kind, parser, pv in await db.execute(
+                select(
+                    Intake.version_id,
+                    Intake.filename,
+                    Intake.detected_type,
+                    Intake.parser,
+                    Intake.parser_version,
+                ).where(Intake.version_id.in_(current), Intake.outcome == "accepted")
+            )
         }
     return result
 
