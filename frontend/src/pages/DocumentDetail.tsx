@@ -13,7 +13,13 @@ type Detail = Omit<DocumentSummary, 'author_name'> & {
   last_decision?: { decision: string; reason: string | null; version_id: string } | null
 }
 
-export default function DocumentDetail() {
+// Keyed by document so open-version and edit state never carry over to another document.
+export default function DocumentDetailPage() {
+  const { documentId = '' } = useParams()
+  return <DocumentDetail key={documentId} />
+}
+
+function DocumentDetail() {
   const { documentId = '' } = useParams()
   const { base, manager, userId } = useWorkspace()
   const path = `${base}/documents/${documentId}`

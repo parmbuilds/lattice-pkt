@@ -97,7 +97,7 @@ async def remove_member(user_id: UUID, subject: Member, db: DB) -> None:
         target_role=target.role if target else None,
         detail={"target_user_id": str(user_id)},
     )
-    await svc.remove_member(db, subject.workspace_id, user_id)
+    await svc.remove_member(db, subject.workspace_id, user_id, target.role)
 
 
 @router.post("/api/workspaces/{workspace_id}/transfer")

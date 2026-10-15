@@ -18,6 +18,9 @@ def validate_name(value: str) -> str:
     return value
 
 
+ROLE_CHANGED = HTTPException(409, "This member's role changed. Reload and retry.")
+
+
 async def membership(db: AsyncSession, workspace_id: UUID, user_id: UUID) -> Membership | None:
     return await db.scalar(
         select(Membership).where(
@@ -26,14 +29,21 @@ async def membership(db: AsyncSession, workspace_id: UUID, user_id: UUID) -> Mem
     )
 
 
-async def remove_member(db: AsyncSession, workspace_id: UUID, user_id: UUID) -> None:
+async def remove_member(
+    db: AsyncSession, workspace_id: UUID, user_id: UUID, authorized_role: str
+) -> None:
     """Group memberships and direct grants go with the membership (FK cascade); tokens are
-    revoked, not deleted, so audit rows keep their reference. Authorship stays."""
-    await db.execute(
+    revoked, not deleted, so audit rows keep their reference. Authorship stays. Guarded on
+    the authorized role, like set_role: a concurrent promotion makes this a conflict."""
+    result = await db.execute(
         delete(Membership).where(
-            Membership.workspace_id == workspace_id, Membership.user_id == user_id
+            Membership.workspace_id == workspace_id,
+            Membership.user_id == user_id,
+            Membership.role == authorized_role,
         )
     )
+    if result.rowcount != 1:
+        raise ROLE_CHANGED
     await db.execute(
         update(AccessToken)
         .where(
@@ -43,9 +53,6 @@ async def remove_member(db: AsyncSession, workspace_id: UUID, user_id: UUID) -> 
         )
         .values(revoked_at=datetime.now(UTC))
     )
-
-
-ROLE_CHANGED = HTTPException(409, "This member's role changed. Reload and retry.")
 
 
 async def set_role(

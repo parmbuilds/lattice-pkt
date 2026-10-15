@@ -8,7 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
 from app.auth import GuardMiddleware
-from app.config import Settings, get_settings
+from app.config import DEV_PEPPER, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
 from app.mcp_server import build_mcp, transport_security
 from app.routers import audit as audit_routes
@@ -34,6 +34,9 @@ class SpaFiles(StaticFiles):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    if settings.secret_pepper == DEV_PEPPER and not settings.insecure_dev_cookies:
+        # The default is public; outside local development it would make every verifier forgeable.
+        raise RuntimeError("Set LATTICE_SECRET_PEPPER to a private value.")
     engine = make_engine(settings.database_url)
     sessionmaker = make_sessionmaker(engine)
     mcp = build_mcp(settings, sessionmaker)

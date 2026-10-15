@@ -15,5 +15,8 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY backend/ ./
 COPY --from=frontend /frontend/dist ./static
 ENV PATH="/app/.venv/bin:$PATH" LATTICE_STATIC_DIR=/app/static
+RUN useradd --system --uid 10001 lattice
+USER lattice
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn --factory app.main:create_app --host 0.0.0.0 --port 8000"]
+# Migrations run separately (the compose `migrate` service), as the owner role.
+CMD ["uvicorn", "--factory", "app.main:create_app", "--host", "0.0.0.0", "--port", "8000"]

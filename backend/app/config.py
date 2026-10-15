@@ -4,6 +4,8 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEV_PEPPER = "dev-pepper-change-me"
+
 
 class Settings(BaseSettings):
     """Runtime configuration, read from LATTICE_* environment variables."""
@@ -18,7 +20,7 @@ class Settings(BaseSettings):
     )
 
     # Server-side secret for HMAC verifiers of sessions, tokens and invites (KTD7).
-    secret_pepper: str = Field(default="dev-pepper-change-me", min_length=16)
+    secret_pepper: str = Field(default=DEV_PEPPER, min_length=16)
 
     # The single origin the browser UI and API are served from (KTD12, KTD13).
     public_origin: str = "http://localhost:8000"

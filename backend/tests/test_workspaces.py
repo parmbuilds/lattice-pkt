@@ -341,3 +341,28 @@ async def test_names_are_trimmed_and_must_be_1_to_100_characters(settings):
         assert (await owner.post(groups, json={"name": "x" * 101})).status_code == 400
         group = await owner.post(groups, json={"name": " Platform "})
         assert group.json()["name"] == "Platform"
+
+
+async def test_removing_a_member_who_was_promoted_meanwhile_is_a_conflict(settings, pg):
+    from uuid import UUID
+
+    import pytest
+    from fastapi import HTTPException
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.db import make_sessionmaker
+    from app.services.workspaces import remove_member
+
+    async with signed_in(settings) as owner, signed_in(settings) as member:
+        ws = await create_workspace(owner)
+        await join(owner, ws, member, "admin")
+        # The interleaving: an admin's removal of a member, authorized before a promotion.
+        engine = create_async_engine(pg["app"])
+        try:
+            async with make_sessionmaker(engine)() as db, db.begin():
+                with pytest.raises(HTTPException) as conflict:
+                    await remove_member(db, UUID(ws), UUID(member.user_id), "member")
+            assert conflict.value.status_code == 409
+        finally:
+            await engine.dispose()
+        assert (await _roles(owner, ws))[member.user_id] == "admin"

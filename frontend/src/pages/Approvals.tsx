@@ -18,6 +18,12 @@ const staleRefusal = (e: unknown) =>
     ? 'Refused: this draft was replaced or already decided. The current pending drafts have been reloaded.'
     : errorText(e)
 
+function diffClass(line: string) {
+  if (line.startsWith('+')) return 'add'
+  if (line.startsWith('-')) return 'del'
+  return undefined
+}
+
 export default function Approvals() {
   const { base, manager } = useWorkspace()
   const docs = useLoad<{ documents: DocumentSummary[] }>(manager ? `${base}/documents` : null)
@@ -74,7 +80,7 @@ function ReviewCard({
         <>
           <pre className="diff" aria-label="Changes against the approved version">
             {r.diff.map((line, i) => (
-              <span key={i} className={line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : undefined}>
+              <span key={i} className={diffClass(line)}>
                 {line}
                 {'\n'}
               </span>
