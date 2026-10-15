@@ -356,6 +356,30 @@ describe('ReviewCard', () => {
     }
   })
 
+  it('keeps checking for readiness after one failed request', async () => {
+    let calls = 0
+    mockApi({
+      [`GET ${BASE}/d1/review`]: () => {
+        calls++
+        if (calls === 2) return new Reply(503, { detail: 'Try again.' })
+        return review({ derivation: { status: calls === 1 ? 'pending' : 'ready', error: null } })
+      },
+    })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await mountReview()
+      await vi.advanceTimersByTimeAsync(2000)
+      await flushPromises()
+      expect(document.body.textContent).toContain('Try again.')
+      await vi.advanceTimersByTimeAsync(2000)
+      await flushPromises()
+      expect(approveButton().disabled).toBe(false)
+      expect(calls).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('renders hidden content and an HTML-looking filename as text', async () => {
     mockApi({
       [`GET ${BASE}/d1/review`]: review({

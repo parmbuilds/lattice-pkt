@@ -32,11 +32,14 @@ const props = defineProps<{
 
 const path = computed(() => `${props.base}/documents/${props.doc.id}`)
 const review = useLoad<Review>(() => `${path.value}/review`)
-// The worker readies drafts in the background: check again until this one is ready (R11).
+// The worker readies drafts in the background: check again until this one is ready (R11),
+// and keep checking through a failed request so one network blip does not end the wait.
+let waiting = false
 watch(
-  () => review.data,
-  (data, _old, onCleanup) => {
-    if (!data || data.derivation.status === 'ready') return
+  () => [review.data, review.error] as const,
+  ([data, error], _old, onCleanup) => {
+    if (data) waiting = data.derivation.status !== 'ready'
+    if (!waiting || (!data && !error)) return
     const timer = setTimeout(review.reload, 2000)
     onCleanup(() => clearTimeout(timer))
   },
