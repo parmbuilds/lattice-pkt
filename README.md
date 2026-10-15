@@ -106,7 +106,7 @@ npm test
 npm run build
 ```
 
-Run the API locally against the Compose database with `uv run uvicorn --factory app.main:create_app --reload` after `uv run alembic upgrade head`; settings are read from `LATTICE_*` environment variables (see [`backend/app/config.py`](backend/app/config.py)).
+Run the API locally against the Compose database with `LATTICE_INSECURE_DEV_COOKIES=true uv run uvicorn --factory app.main:create_app --reload` after `uv run alembic upgrade head`. Without a private `LATTICE_SECRET_PEPPER`, the app starts only in this local development mode; settings are read from `LATTICE_*` environment variables (see [`backend/app/config.py`](backend/app/config.py)).
 
 ## Layout
 

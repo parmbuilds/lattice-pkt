@@ -31,7 +31,8 @@ services:
     build: .
     environment:
       LATTICE_DATABASE_URL: postgresql+psycopg://lattice_app:lattice_app_dev@db:5432/lattice
-      LATTICE_SECRET_PEPPER: ${LATTICE_SECRET_PEPPER:-local-demo-pepper-change-me}
+      # The fallback is the public DEV_PEPPER, so the app refuses it once dev cookies are turned off.
+      LATTICE_SECRET_PEPPER: ${LATTICE_SECRET_PEPPER:-dev-pepper-change-me}
       LATTICE_PUBLIC_ORIGIN: http://localhost:8000
       # Local HTTP only; remove behind TLS (KTD13).
       LATTICE_INSECURE_DEV_COOKIES: "true"
