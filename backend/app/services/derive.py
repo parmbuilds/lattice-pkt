@@ -234,8 +234,11 @@ async def run_worker(
     """The in-process worker loop the app lifespan runs (KTD3)."""
     while True:
         try:
-            if await tick(sessionmaker, embedder, settings) is not None:
-                continue  # drain due work before sleeping
+            # Sweep once per poll, then drain: new drafts are enqueued inline, so the sweep
+            # only catches config changes and missed rows.
+            await sweep(sessionmaker, embedder)
+            while (version_id := await claim(sessionmaker, embedder, settings)) is not None:
+                await derive(sessionmaker.begin, embedder, settings, version_id)
         except Exception:
             log.exception("derivation worker tick failed")
         await asyncio.sleep(settings.derive_poll_seconds)

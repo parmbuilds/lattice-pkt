@@ -335,6 +335,9 @@ class Intake(Base):
         CheckConstraint("length(filename) <= 256", name="intakes_filename_check"),
         CheckConstraint("length(reason) <= 256", name="intakes_reason_check"),
         *_document_keys("intakes"),
+        # Review, approve and document detail look intakes up by version; uploads by hash.
+        Index("intakes_version_idx", "version_id"),
+        Index("intakes_workspace_source_idx", "workspace_id", "source_sha256"),
     )
 
 
@@ -348,7 +351,10 @@ class IntakePayload(Base):
     version_id: Mapped[uuid.UUID]
     original: Mapped[bytes] = mapped_column(LargeBinary)
     hidden_excerpts: Mapped[list] = mapped_column(JSONB)
-    __table_args__ = _document_keys("intake_payloads")
+    __table_args__ = (
+        *_document_keys("intake_payloads"),
+        Index("intake_payloads_document_idx", "document_id"),  # purge_document
+    )
 
 
 class Derivation(Base):
@@ -371,6 +377,13 @@ class Derivation(Base):
         ),
         UniqueConstraint("version_id", "config_hash", name="derivations_version_config_key"),
         *_document_keys("derivations"),
+        Index("derivations_document_idx", "document_id"),  # purge_document
+        # The worker's queue: most rows are ready, so claim reads only the rest.
+        Index(
+            "derivations_due_idx",
+            "next_attempt_at",
+            postgresql_where=text("status <> 'ready'"),
+        ),
     )
 
 
@@ -400,6 +413,7 @@ class Chunk(Base):
         Index("chunks_version_config_idx", "version_id", "config_hash"),
         # Lets vector search compute distances for one workspace's chunks, not the whole table.
         Index("chunks_workspace_config_idx", "workspace_id", "config_hash"),
+        Index("chunks_document_idx", "document_id"),  # purge_document
     )
 
 
