@@ -2,9 +2,17 @@
 COMPOSE := docker compose
 URL := http://localhost:8000
 BACKUPS := backups
+# Dev mode runs the API and UI on this machine against the Compose database.
+DB_PORT := $(if $(LATTICE_DB_PORT),$(LATTICE_DB_PORT),5432)
+MODEL_CACHE := $(CURDIR)/.cache/fastembed
+MODEL := BAAI/bge-small-en-v1.5
+DEV_ENV := LATTICE_INSECURE_DEV_COOKIES=true LATTICE_PUBLIC_ORIGIN=http://localhost:5173 \
+	FASTEMBED_CACHE_PATH=$(MODEL_CACHE) \
+	LATTICE_DATABASE_URL=postgresql+psycopg://lattice_app:lattice_app_dev@localhost:$(DB_PORT)/lattice \
+	LATTICE_MIGRATION_DATABASE_URL=postgresql+psycopg://lattice_owner:lattice_owner_dev@localhost:$(DB_PORT)/lattice
 
 .DEFAULT_GOAL := help
-.PHONY: help build start stop restart down ps logs seed migrate psql backup restore test lint e2e
+.PHONY: help build start dev stop restart down ps logs seed migrate psql backup restore test lint e2e
 
 help: ## List the commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-9s %s\n", $$1, $$2}'
@@ -16,6 +24,20 @@ build: ## Build the app and migrate images
 start: ## Build if needed, migrate, and start the stack
 	$(COMPOSE) up -d --build
 	@printf 'Waiting for %s ' "$(URL)"; for i in $$(seq 1 60); do curl -sf $(URL)/api/health >/dev/null && { echo ok; exit 0; }; printf .; sleep 1; done; echo; echo 'Not healthy after 60s; run make logs'; exit 1
+
+# The app container is stopped so the local API can take port 8000; `make start` switches back.
+dev: ## Auto-reloading API and UI on this machine at http://localhost:5173 (Ctrl-C stops both)
+	$(COMPOSE) stop app
+	$(COMPOSE) up -d --wait db
+	cd backend && $(DEV_ENV) uv run alembic upgrade head
+	@test -d $(MODEL_CACHE) || { echo 'Downloading the embedding model once into .cache/fastembed'; \
+		cd backend && FASTEMBED_CACHE_PATH=$(MODEL_CACHE) uv run python -c "from fastembed import TextEmbedding; TextEmbedding('$(MODEL)')"; }
+	@test -d frontend/node_modules || (cd frontend && npm ci)
+	@echo 'UI http://localhost:5173 (API :8000, both reload on save). Ctrl-C stops both; make start goes back to Docker.'
+	@trap 'kill $$(jobs -p) 2>/dev/null' INT TERM; \
+		(cd backend && $(DEV_ENV) uv run uvicorn --factory app.main:create_app --reload --reload-dir app --port 8000) & \
+		(cd frontend && npm run dev -- --port 5173 --strictPort) & \
+		wait
 
 stop: ## Stop the containers (data is kept)
 	$(COMPOSE) stop

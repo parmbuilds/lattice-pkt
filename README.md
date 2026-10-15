@@ -13,6 +13,8 @@ make start   # docker compose up -d --build, then waits until the app is healthy
 make seed    # docker compose exec app python -m app.seed
 ```
 
+For development, `make dev` keeps the database in Docker and runs the API (uvicorn `--reload`) and the UI (Vite) on your machine at <http://localhost:5173>, both reloading on save; Ctrl-C stops both and `make start` switches back to the Docker app. The first run downloads the embedding model into the git-ignored `.cache/fastembed`.
+
 `make` lists the other commands: `stop`, `restart`, `down`, `ps`, `logs` (one service with `s=app`), `migrate`, `psql`, `backup` and `restore file=…` (dumps go to the git-ignored `backups/`), `test`, `lint` and `e2e`.
 
 Open <http://localhost:8000> and sign in as one of the seeded people (password `lattice-demo-password`):
