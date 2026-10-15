@@ -1,0 +1,368 @@
+/* Bundled to a file by Vite: the CSP forbids inline styles (KTD13). */
+@import 'tailwindcss';
+@import '@fontsource/ibm-plex-sans/latin-400.css';
+@import '@fontsource/ibm-plex-sans/latin-500.css';
+@import '@fontsource/ibm-plex-sans/latin-600.css';
+@import '@fontsource/ibm-plex-sans-condensed/latin-500.css';
+@import '@fontsource/ibm-plex-sans-condensed/latin-600.css';
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
+
+/* Drawing Register: drafting-film ground, ink title blocks, blueline for links, redline only for changes and refusals. */
+@theme {
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-cond: 'IBM Plex Sans Condensed', 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --color-ink: #121417;
+  --color-ink-2: #262b2f;
+  --color-graphite: #474e4b;
+  --color-muted: #616a66;
+  --color-rule: #d5dad7;
+  --color-rule-strong: #a3aca8;
+  --color-film: #eef1ef;
+  --color-sheet: #fcfdfc;
+  --color-blueline: #2b5fae;
+  --color-blueline-tint: #e4ecf8;
+  --color-redline: #d43d2b;
+  --color-redline-ink: #a92d1f;
+  --color-redline-tint: #fbebe8;
+  --color-approved: #1d6a48;
+  --color-approved-tint: #e2f0e8;
+  --color-draft: #845600;
+  --color-draft-tint: #fbf0d8;
+  --color-rail-text: #e6eae8;
+  --color-rail-muted: #98a39e;
+  --color-highlight: #f5e3a1;
+
+  --text-2xs: 0.6875rem;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  html {
+    background: var(--color-film);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    accent-color: var(--color-blueline);
+    caret-color: var(--color-blueline);
+    scrollbar-color: var(--color-rule-strong) transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--color-blueline-tint);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-blueline);
+    outline-offset: 2px;
+  }
+
+  a {
+    color: var(--color-blueline);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  table,
+  time,
+  code {
+    font-variant-numeric: tabular-nums;
+  }
+
+  code,
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  mark {
+    background: var(--color-highlight);
+    color: inherit;
+    padding: 0 0.1em;
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  .caps {
+    font-family: var(--font-cond);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    min-height: 2rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--color-rule-strong);
+    border-radius: 3px;
+    background: var(--color-sheet);
+    color: var(--color-ink);
+    font-size: 0.875rem;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 120ms, border-color 120ms;
+  }
+  .btn:hover {
+    background: var(--color-film);
+    border-color: var(--color-graphite);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: var(--color-sheet);
+  }
+  .btn-primary:hover {
+    background: var(--color-ink-2);
+    border-color: var(--color-ink-2);
+  }
+  .btn-danger {
+    border-color: var(--color-redline);
+    color: var(--color-redline-ink);
+  }
+  .btn-danger:hover {
+    background: var(--color-redline-tint);
+    border-color: var(--color-redline-ink);
+  }
+  .btn-quiet {
+    border-color: transparent;
+    background: transparent;
+    color: var(--color-blueline);
+    padding: 0 0.375rem;
+  }
+  .btn-quiet:hover {
+    background: var(--color-blueline-tint);
+    border-color: transparent;
+  }
+
+  .field {
+    display: grid;
+    gap: 0.25rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-graphite);
+  }
+
+  .input {
+    width: 100%;
+    min-height: 2.25rem;
+    padding: 0.375rem 0.625rem;
+    border: 1px solid var(--color-rule-strong);
+    border-radius: 3px;
+    background: #fff;
+    color: var(--color-ink);
+    font-size: 0.9375rem;
+    font-weight: 400;
+  }
+  .input:hover {
+    border-color: var(--color-graphite);
+  }
+  .input:focus-visible {
+    outline-offset: 0;
+    border-color: var(--color-blueline);
+  }
+  textarea.input {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  .sheet {
+    background: var(--color-sheet);
+    border: 1px solid var(--color-rule);
+    border-radius: 4px;
+  }
+
+  .register {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .register th {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1.5px solid var(--color-ink);
+    color: var(--color-graphite);
+    text-align: left;
+    font-family: var(--font-cond);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .register td {
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--color-rule);
+    vertical-align: top;
+  }
+  .register tbody tr:hover td {
+    background: color-mix(in oklab, var(--color-film) 60%, transparent);
+  }
+
+  /* One stamp form at fixed sizes; the wording and border style carry state, colour is a second cue. */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    height: 1.375rem;
+    padding: 0 0.375rem;
+    border: 1.5px solid currentColor;
+    border-radius: 2px;
+    font-family: var(--font-cond);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .stamp-lg {
+    height: 1.75rem;
+    padding: 0 0.5rem;
+    font-size: 0.8125rem;
+    border-width: 2px;
+  }
+  .stamp-approved,
+  .stamp-allow {
+    color: var(--color-approved);
+    background: var(--color-approved-tint);
+  }
+  .stamp-draft {
+    color: var(--color-draft);
+    background: var(--color-draft-tint);
+    border-style: dashed;
+  }
+  .stamp-withdrawn {
+    color: var(--color-muted);
+    text-decoration: line-through;
+  }
+  .stamp-superseded,
+  .stamp-plain {
+    color: var(--color-muted);
+    border-width: 1px;
+  }
+  .stamp-rejected,
+  .stamp-deny {
+    color: var(--color-redline-ink);
+    background: var(--color-redline-tint);
+  }
+
+  /* The title block: ruled cells, condensed caps labels, values below. */
+  /* The ink shows through 1px gaps, so every rule is exact whatever cells span. */
+  .titleblock {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    border: 1.5px solid var(--color-ink);
+    background: var(--color-ink);
+  }
+  .titleblock > div {
+    padding: 0.5rem 0.75rem 0.625rem;
+    background: var(--color-sheet);
+    min-width: 0;
+  }
+  .titleblock > .span {
+    grid-column: 1 / -1;
+  }
+  .titleblock dt {
+    font-family: var(--font-cond);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-graphite);
+  }
+  .titleblock dd {
+    margin-top: 0.125rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  /* A revision cloud drawn round each added hunk, as a drafter marks changes on a drawing. */
+  .cloud {
+    border: 10px solid var(--color-redline);
+    border-image: url('./assets/cloud.svg') 10 round;
+    margin: 0.125rem -0.375rem;
+  }
+  .diff-del {
+    color: var(--color-redline-ink);
+    text-decoration: line-through;
+    text-decoration-color: var(--color-redline);
+  }
+
+  .alert {
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-redline);
+    border-radius: 3px;
+    background: var(--color-redline-tint);
+    color: var(--color-redline-ink);
+    font-weight: 500;
+  }
+
+  /* Kept in the DOM for its live region; takes no space until it has something to say. */
+  .status:empty {
+    display: none;
+  }
+  .status:not(:empty) {
+    padding: 0.5rem 0.875rem;
+    border: 1px solid var(--color-rule-strong);
+    border-radius: 3px;
+    background: var(--color-sheet);
+    font-weight: 500;
+    animation: press 520ms var(--ease-out-expo);
+  }
+}
+
+/* The one authored moment: a confirmation lands like a stamp pressed onto the sheet. */
+@keyframes press {
+  from {
+    transform: scale(1.02);
+    background-color: var(--color-blueline-tint);
+    border-color: var(--color-blueline);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status:not(:empty) {
+    animation: none;
+  }
+}
+
+@layer base {
+  ::placeholder {
+    color: var(--color-muted);
+    opacity: 1;
+  }
+}

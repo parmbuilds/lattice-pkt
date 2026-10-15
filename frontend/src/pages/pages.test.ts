@@ -1,14 +1,15 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { type Role, SessionContext } from '../session'
-import Audit from './Audit'
-import Groups from './Groups'
-import Search from './Search'
-import Tokens from './Tokens'
+import type { Component } from 'vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { me, type Role } from '../session'
+import Audit from './Audit.vue'
+import Groups from './Groups.vue'
+import Search from './Search.vue'
+import Tokens from './Tokens.vue'
 
 const EVIL = '<img src=x onerror=alert(1)>'
+let mounted: VueWrapper | undefined
 
 // Responses keyed by "METHOD /path" (query string ignored).
 function mockApi(routes: Record<string, unknown>) {
@@ -22,25 +23,24 @@ function mockApi(routes: Record<string, unknown>) {
   )
 }
 
-function renderPage(path: string, routePath: string, page: ReactNode, role: Role = 'admin') {
-  const me = {
+async function renderPage(path: string, routePath: string, page: Component, role: Role = 'admin') {
+  me.value = {
     user: { id: 'u1', email: 'ada@example.com', name: 'Ada' },
     csrf_token: 'csrf',
     memberships: [{ workspace_id: 'ws1', workspace_name: 'Acme', role }],
   }
-  return render(
-    <SessionContext value={{ me, refresh: async () => {} }}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path={routePath} element={page} />
-        </Routes>
-      </MemoryRouter>
-    </SessionContext>,
-  )
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: routePath, component: page }] })
+  await router.push(path)
+  mounted = mount(page, { global: { plugins: [router] }, attachTo: document.body })
+  await flushPromises()
+  return mounted
 }
 
+const field = (w: VueWrapper, label: string) => w.findAll('label').find((l) => l.text().startsWith(label))!.find('input')
+
 afterEach(() => {
-  cleanup()
+  mounted?.unmount()
+  mounted = undefined
   vi.unstubAllGlobals()
 })
 
@@ -51,7 +51,7 @@ describe('Tokens page', () => {
       name: 'laptop',
       prefix: 'lat_ab12',
       created_at: '2026-10-15T00:00:00Z',
-      expires_at: '2027-01-13T00:00:00Z',
+      expires_at: '2099-01-13T00:00:00Z',
       revoked: false,
       last_used_at: null,
     }
@@ -59,19 +59,20 @@ describe('Tokens page', () => {
       'GET /api/workspaces/ws1/tokens': { tokens: [listed] },
       'POST /api/workspaces/ws1/tokens': { ...listed, token: 'lat_SECRET_VALUE' },
     })
-    renderPage('/w/ws1/tokens', '/w/:workspaceId/tokens', <Tokens />, 'member')
-    await screen.findByText('laptop')
+    let w = await renderPage('/w/ws1/tokens', '/w/:workspaceId/tokens', Tokens, 'member')
+    expect(document.body.textContent).toContain('laptop')
     expect(document.body.textContent).not.toContain('lat_SECRET_VALUE')
 
-    fireEvent.change(screen.getByLabelText('Token name'), { target: { value: 'laptop' } })
-    fireEvent.change(screen.getByLabelText('Your password'), { target: { value: 'pw123456' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create token' }))
-    await screen.findByText('lat_SECRET_VALUE')
+    await field(w, 'Token name').setValue('laptop')
+    await field(w, 'Your password').setValue('pw123456')
+    await w.findAll('form').find((f) => f.text().includes('Create token'))!.trigger('submit')
+    await flushPromises()
+    expect(document.body.textContent).toContain('lat_SECRET_VALUE')
     expect(document.body.textContent).toContain('will not be shown again')
 
-    cleanup()
-    renderPage('/w/ws1/tokens', '/w/:workspaceId/tokens', <Tokens />, 'member')
-    await screen.findByText('laptop')
+    w.unmount()
+    w = await renderPage('/w/ws1/tokens', '/w/:workspaceId/tokens', Tokens, 'member')
+    expect(document.body.textContent).toContain('laptop')
     expect(document.body.textContent).not.toContain('lat_SECRET_VALUE')
   })
 })
@@ -82,8 +83,8 @@ describe('user-supplied strings render as text', () => {
       'GET /api/workspaces/ws1/groups': { groups: [{ id: 'g1', name: EVIL, members: [] }] },
       'GET /api/workspaces/ws1/members': { members: [] },
     })
-    renderPage('/w/ws1/groups', '/w/:workspaceId/groups', <Groups />)
-    expect(await screen.findByText(EVIL)).toBeTruthy()
+    await renderPage('/w/ws1/groups', '/w/:workspaceId/groups', Groups)
+    expect(document.body.textContent).toContain(EVIL)
     expect(document.querySelector('img')).toBeNull()
   })
 
@@ -110,8 +111,8 @@ describe('user-supplied strings render as text', () => {
       },
       'GET /api/workspaces/ws1/members': { members: [] },
     })
-    renderPage('/w/ws1/audit', '/w/:workspaceId/audit', <Audit />)
-    await screen.findByText('manage_groups')
+    await renderPage('/w/ws1/audit', '/w/:workspaceId/audit', Audit)
+    expect(document.body.textContent).toContain('manage_groups')
     expect(document.body.textContent).toContain(EVIL)
     expect(document.querySelector('img')).toBeNull()
   })
@@ -129,17 +130,16 @@ describe('Search page', () => {
             rank: 0.5,
             snippet: 'a [[checkout]] b',
             approved_at: '2026-10-15T00:00:00Z',
-            approved_by: 'u2',
+            approved_by: 'Arjun',
           },
         ],
       },
     })
-    renderPage('/w/ws1/search', '/w/:workspaceId/search', <Search />, 'member')
-    fireEvent.change(screen.getByLabelText('Search approved documents'), {
-      target: { value: 'checkout' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
-    await screen.findByText('Checkout guide')
+    const w = await renderPage('/w/ws1/search', '/w/:workspaceId/search', Search, 'member')
+    await field(w, 'Search approved documents').setValue('checkout')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(document.body.textContent).toContain('Checkout guide')
     const marks = document.querySelectorAll('mark')
     expect(marks).toHaveLength(1)
     expect(marks[0].textContent).toBe('checkout')

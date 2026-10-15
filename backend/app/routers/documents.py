@@ -150,6 +150,8 @@ async def get_document(document_id: UUID, subject: Member, db: DB) -> dict:
     pending = doc.pending_version_id if sees_pending else None
     shown = await db.get(DocumentVersion, pending or primary)
     result = _summary(doc, serving=doc.serving_version_id, pending=pending) | {
+        # Same name the document list already shows to anyone who can see this document.
+        "author_name": await db.scalar(select(User.display_name).where(User.id == doc.author_id)),
         "title": shown.title,
         "body": shown.body,
         "shown_version_id": str(shown.id),

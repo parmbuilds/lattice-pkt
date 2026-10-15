@@ -1,0 +1,450 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-15T03:12:51.633750+00:00",
+  "title": "Design System: Lattice",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "primary",
+        "displayName": "Drawing Ink",
+        "canonical": "#121417",
+        "tonalRamp": [
+          "#050607",
+          "#090a0c",
+          "#0d0e10",
+          "#101214",
+          "#4d4f51",
+          "#888a8b",
+          "#c4c4c5",
+          "#e7e8e8"
+        ]
+      },
+      "ink-raised": {
+        "role": "neutral",
+        "displayName": "Ink Raised",
+        "canonical": "#262b2f",
+        "tonalRamp": [
+          "#0b0d0e",
+          "#131618",
+          "#1b1e21",
+          "#212629",
+          "#5c6063",
+          "#929597",
+          "#c9cacb",
+          "#e9eaea"
+        ]
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite",
+        "canonical": "#474e4b",
+        "tonalRamp": [
+          "#151716",
+          "#242726",
+          "#323734",
+          "#3e4542",
+          "#757a78",
+          "#a3a6a5",
+          "#d1d3d2",
+          "#ededed"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#616a66",
+        "tonalRamp": [
+          "#1d201f",
+          "#303533",
+          "#444a47",
+          "#555d5a",
+          "#888f8c",
+          "#b0b4b2",
+          "#d8dad9",
+          "#eff0f0"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule",
+        "canonical": "#d5dad7",
+        "tonalRamp": [
+          "#404140",
+          "#6a6d6c",
+          "#959996",
+          "#bbc0bd",
+          "#e0e3e1",
+          "#eaeceb",
+          "#f4f6f5",
+          "#fbfbfb"
+        ]
+      },
+      "rule-strong": {
+        "role": "neutral",
+        "displayName": "Rule Strong",
+        "canonical": "#a3aca8",
+        "tonalRamp": [
+          "#313432",
+          "#525654",
+          "#727876",
+          "#8f9794",
+          "#bac1be",
+          "#d1d6d4",
+          "#e8eae9",
+          "#f6f7f6"
+        ]
+      },
+      "drafting-film": {
+        "role": "neutral",
+        "displayName": "Drafting Film",
+        "canonical": "#eef1ef",
+        "tonalRamp": [
+          "#474848",
+          "#777878",
+          "#a7a9a7",
+          "#d1d4d2",
+          "#f2f4f3",
+          "#f6f8f7",
+          "#fbfcfb",
+          "#fdfefd"
+        ]
+      },
+      "sheet": {
+        "role": "neutral",
+        "displayName": "Sheet",
+        "canonical": "#fcfdfc",
+        "tonalRamp": [
+          "#4c4c4c",
+          "#7e7e7e",
+          "#b0b1b0",
+          "#dedfde",
+          "#fdfefd",
+          "#fefefe",
+          "#fefefe",
+          "#ffffff"
+        ]
+      },
+      "blueline": {
+        "role": "primary",
+        "displayName": "Blueline",
+        "canonical": "#2b5fae",
+        "tonalRamp": [
+          "#0d1c34",
+          "#163057",
+          "#1e427a",
+          "#265499",
+          "#6087c2",
+          "#95afd6",
+          "#cad7eb",
+          "#eaeff7"
+        ]
+      },
+      "blueline-tint": {
+        "role": "neutral",
+        "displayName": "Blueline Tint",
+        "canonical": "#e4ecf8",
+        "tonalRamp": [
+          "#44474a",
+          "#72767c",
+          "#a0a5ae",
+          "#c9d0da",
+          "#ebf1fa",
+          "#f2f6fc",
+          "#f8fafd",
+          "#fcfdfe"
+        ]
+      },
+      "redline": {
+        "role": "secondary",
+        "displayName": "Redline",
+        "canonical": "#d43d2b",
+        "tonalRamp": [
+          "#40120d",
+          "#6a1e16",
+          "#942b1e",
+          "#bb3626",
+          "#df6e60",
+          "#ea9e95",
+          "#f4ceca",
+          "#fbecea"
+        ]
+      },
+      "redline-ink": {
+        "role": "neutral",
+        "displayName": "Redline Ink",
+        "canonical": "#a92d1f",
+        "tonalRamp": [
+          "#330e09",
+          "#541610",
+          "#762016",
+          "#95281b",
+          "#be6257",
+          "#d4968f",
+          "#eacac7",
+          "#f6eae9"
+        ]
+      },
+      "redline-tint": {
+        "role": "neutral",
+        "displayName": "Redline Tint",
+        "canonical": "#fbebe8",
+        "tonalRamp": [
+          "#4b4646",
+          "#7e7674",
+          "#b0a4a2",
+          "#ddcfcc",
+          "#fcf0ee",
+          "#fdf5f4",
+          "#fefaf9",
+          "#fffdfd"
+        ]
+      },
+      "approved": {
+        "role": "tertiary",
+        "displayName": "Approved Ink",
+        "canonical": "#1d6a48",
+        "tonalRamp": [
+          "#092016",
+          "#0e3524",
+          "#144a32",
+          "#1a5d3f",
+          "#568f76",
+          "#8eb4a4",
+          "#c6dad1",
+          "#e8f0ed"
+        ]
+      },
+      "approved-tint": {
+        "role": "neutral",
+        "displayName": "Approved Tint",
+        "canonical": "#e2f0e8",
+        "tonalRamp": [
+          "#444846",
+          "#717874",
+          "#9ea8a2",
+          "#c7d3cc",
+          "#e9f4ee",
+          "#f0f8f4",
+          "#f8fbf9",
+          "#fcfefd"
+        ]
+      },
+      "draft": {
+        "role": "tertiary",
+        "displayName": "Draft Ink",
+        "canonical": "#845600",
+        "tonalRamp": [
+          "#281a00",
+          "#422b00",
+          "#5c3c00",
+          "#744c00",
+          "#a38040",
+          "#c2aa80",
+          "#e0d5bf",
+          "#f3eee6"
+        ]
+      },
+      "draft-tint": {
+        "role": "neutral",
+        "displayName": "Draft Tint",
+        "canonical": "#fbf0d8",
+        "tonalRamp": [
+          "#4b4841",
+          "#7e786c",
+          "#b0a897",
+          "#ddd3be",
+          "#fcf4e2",
+          "#fdf8ec",
+          "#fefbf5",
+          "#fffefb"
+        ]
+      },
+      "rail-text": {
+        "role": "neutral",
+        "displayName": "Rail Text",
+        "canonical": "#e6eae8",
+        "tonalRamp": [
+          "#454646",
+          "#737574",
+          "#a1a4a2",
+          "#cacecc",
+          "#ecefee",
+          "#f2f4f4",
+          "#f9faf9",
+          "#fcfdfd"
+        ]
+      },
+      "rail-muted": {
+        "role": "neutral",
+        "displayName": "Rail Muted",
+        "canonical": "#98a39e",
+        "tonalRamp": [
+          "#2e312f",
+          "#4c524f",
+          "#6a726f",
+          "#868f8b",
+          "#b2bab6",
+          "#ccd1ce",
+          "#e5e8e7",
+          "#f5f6f5"
+        ]
+      },
+      "highlight": {
+        "role": "neutral",
+        "displayName": "Highlight",
+        "canonical": "#f5e3a1",
+        "tonalRamp": [
+          "#4a4430",
+          "#7a7250",
+          "#ac9f71",
+          "#d8c88e",
+          "#f8eab8",
+          "#faf1d0",
+          "#fcf8e8",
+          "#fefcf6"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Sign-in statement only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "One page title per screen."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section and panel headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Everything else; document text capped at 75ch."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Title-block labels, table headers, stamps, nav groups."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Ids, prefixes, audit actions, diffs, config."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "ease-out-expo",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The status-message press, 520ms; off under reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary Button",
+      "html": "<button class=\"ds-btn-primary\">New document</button>",
+      "css": ".ds-btn-primary{background:var(--color-ink, #121417);color:var(--color-sheet, #fcfdfc);border:1px solid var(--color-ink, #121417);border-radius:3px;min-height:32px;padding:0 12px;font:500 14px \"IBM Plex Sans\",sans-serif;cursor:pointer;transition:background-color 120ms}.ds-btn-primary:hover{background:#262b2f}.ds-btn-primary:focus-visible{outline:2px solid var(--color-blueline, #2b5fae);outline-offset:2px}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Danger Button",
+      "html": "<button class=\"ds-btn-danger\">Withdraw</button>",
+      "css": ".ds-btn-danger{background:var(--color-sheet, #fcfdfc);color:var(--color-redline-ink, #a92d1f);border:1px solid var(--color-redline, #d43d2b);border-radius:3px;min-height:32px;padding:0 12px;font:500 14px \"IBM Plex Sans\",sans-serif;cursor:pointer}.ds-btn-danger:hover{background:var(--color-redline-tint, #fbebe8)}.ds-btn-danger:focus-visible{outline:2px solid var(--color-blueline, #2b5fae);outline-offset:2px}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Text Input",
+      "html": "<label class=\"ds-field\">Token name<input class=\"ds-input\"></label>",
+      "css": ".ds-field{display:grid;gap:4px;font:500 13px \"IBM Plex Sans\",sans-serif;color:var(--color-graphite, #474e4b)}.ds-input{min-height:36px;padding:6px 10px;border:1px solid var(--color-rule-strong, #a3aca8);border-radius:3px;background:#fff;color:var(--color-ink, #121417);font:400 15px \"IBM Plex Sans\",sans-serif}.ds-input:focus-visible{outline:2px solid var(--color-blueline, #2b5fae);border-color:var(--color-blueline, #2b5fae)}"
+    },
+    {
+      "name": "Status Stamps",
+      "kind": "chip",
+      "refersTo": "stamp-approved",
+      "description": "Status Stamps",
+      "html": "<span class=\"ds-stamp ds-ok\">Approved</span> <span class=\"ds-stamp ds-draft\">Edit pending</span> <span class=\"ds-stamp ds-gone\">Withdrawn</span> <span class=\"ds-stamp ds-no\">Rejected</span>",
+      "css": ".ds-stamp{display:inline-flex;align-items:center;height:22px;padding:0 6px;border:1.5px solid currentColor;border-radius:2px;font:600 11px \"IBM Plex Sans Condensed\",sans-serif;letter-spacing:.08em;text-transform:uppercase}.ds-ok{color:var(--color-approved, #1d6a48);background:var(--color-approved-tint, #e2f0e8)}.ds-draft{color:var(--color-draft, #845600);background:var(--color-draft-tint, #fbf0d8);border-style:dashed}.ds-gone{color:var(--color-muted, #616a66);text-decoration:line-through}.ds-no{color:var(--color-redline-ink, #a92d1f);background:var(--color-redline-tint, #fbebe8)}"
+    },
+    {
+      "name": "Title Block",
+      "kind": "custom",
+      "description": "Title Block",
+      "html": "<dl class=\"ds-tb\"><div><dt>ID</dt><dd>c560ec6d</dd></div><div><dt>Rev</dt><dd>B of 2</dd></div><div class=\"ds-span\"><dt>Serves search and agents</dt><dd>REV A, the approved version</dd></div></dl>",
+      "css": ".ds-tb{display:grid;grid-template-columns:1fr 1fr;gap:1px;border:1.5px solid var(--color-ink, #121417);background:var(--color-ink, #121417);margin:0;font-family:\"IBM Plex Sans\",sans-serif}.ds-tb>div{background:var(--color-sheet, #fcfdfc);padding:8px 12px 10px}.ds-tb .ds-span{grid-column:1/-1}.ds-tb dt{font:600 11px \"IBM Plex Sans Condensed\",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--color-graphite, #474e4b)}.ds-tb dd{margin:2px 0 0;font-weight:500}"
+    },
+    {
+      "name": "Rail Navigation",
+      "kind": "nav",
+      "description": "Rail Navigation",
+      "html": "<nav class=\"ds-rail\"><p>Knowledge</p><a aria-current=\"page\">Documents</a><a>Search</a></nav>",
+      "css": ".ds-rail{background:var(--color-ink, #121417);padding:8px;width:220px;font-family:\"IBM Plex Sans\",sans-serif}.ds-rail p{margin:12px 8px 4px;font:600 11px \"IBM Plex Sans Condensed\",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--color-rail-muted, #98a39e)}.ds-rail a{display:block;padding:6px 8px;border-radius:3px;color:var(--color-rail-text, #e6eae8);font:500 14px \"IBM Plex Sans\",sans-serif;cursor:pointer}.ds-rail a:hover{background:#262b2f}.ds-rail a[aria-current]{background:var(--color-drafting-film, #eef1ef);color:var(--color-ink, #121417)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Drawing Register",
+    "overview": "Lattice treats every document the way an engineering office treats a drawing: it has a number, a revision letter, a status stamp and a title block that says who issued it and what it is for. Changes are marked in red the way a drafter clouds a revision. The world exists to make governance legible at a glance, so a person always knows which revision serves search and agents and who it reaches.\n\nThis is a working tool, used daily and during incidents. The world lends type, palette, density and two signature moves (the title block and the revision cloud); navigation, tables, forms and controls stay the standard web components people already know. Screens are light, dense and ruled: an ink rail, a drafting-film ground, sheets laid on it, hairline rules between rows.",
+    "keyCharacteristics": [
+      "Ink side rail on a drafting-film ground; content sits on near-white sheets with hairline rules.",
+      "State shown by stamps whose wording and border style carry meaning before colour does.",
+      "Condensed caps labels, tabular figures, monospace only for ids, diffs, code and config.",
+      "Red is reserved for changes and refusals.",
+      "Flat: depth comes from rules and tone, never shadows."
+    ],
+    "rules": [
+      {
+        "name": "The Redline Rule",
+        "body": "Red marks a change or a refusal and nothing else: diffs, rejected, denied, withdraw and remove actions, errors.",
+        "section": "colors"
+      },
+      {
+        "name": "The Stamp-Before-Colour Rule",
+        "body": "Every state reads without colour: Approved is solid, Draft is dashed, Withdrawn is struck through, Superseded is a hairline.",
+        "section": "colors"
+      },
+      {
+        "name": "The Data-Only Mono Rule",
+        "body": "Monospace marks data a person might copy or compare. Document prose stays in Plex Sans even though it is raw text.",
+        "section": "typography"
+      },
+      {
+        "name": "The Ruled-Not-Raised Rule",
+        "body": "Separate with a rule or a tone step, never a shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do derive every state label from API facts: REV letters from version order, \"Serves search and agents\" from the serving version and withdrawal.",
+      "Do ship every style as bundled CSS. The CSP is `style-src 'self'`: no `style` attributes, no `:style` bindings, no runtime style tags.",
+      "Do keep standard controls (native selects, buttons, tables, details) and let the world show through type, palette, density, stamps, the title block and clouds.",
+      "Do keep denial and absence identical: show \"Not found or not permitted.\" and nothing more."
+    ],
+    "donts": [
+      "Don't use red for anything but changes and refusals.",
+      "Don't use shadows, gradients or glass.",
+      "Don't put a label or eyebrow above a heading; condensed caps belong to labels for values, table headers, stamps and nav groups.",
+      "Don't show or imply features Lattice does not have (citations, vector search, file upload, SSO)."
+    ]
+  }
+}

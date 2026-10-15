@@ -15,6 +15,7 @@ from mcp.server import MCPServer
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -124,12 +125,12 @@ async def _subject(db: AsyncSession) -> Subject:
     """The token's user, with live role and groups, loaded inside the request transaction."""
     token = get_access_token()
     if token is None or not token.claims:
-        raise PermissionError(NOT_FOUND)
+        raise ToolError(NOT_FOUND)
     claims = token.claims
     prefix = security.parse_prefix(token.token, "pat")
     row = await _live_token(db, prefix) if prefix else None
     if row is None:  # revoked or removed since the verifier ran
-        raise PermissionError(NOT_FOUND)
+        raise ToolError(NOT_FOUND)
     return await load_subject(
         db,
         UUID(token.subject),
@@ -203,8 +204,8 @@ def build_mcp(settings: Settings, sessionmaker: async_sessionmaker) -> MCPServer
         async with sessionmaker() as db, db.begin():
             subject = await _subject(db)
             evidence = await _evidence(db, subject, version_id)
-        if evidence is None:
-            raise ValueError(NOT_FOUND)
+        if evidence is None:  # a ToolError reaches the agent; other errors are masked as crashes
+            raise ToolError(NOT_FOUND)
         return evidence
 
     return mcp
