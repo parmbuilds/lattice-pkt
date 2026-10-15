@@ -9,9 +9,11 @@ This repository holds the authorization foundation (workspaces, roles, groups, a
 Requirements: Docker.
 
 ```bash
-docker compose up --build
-docker compose exec app python -m app.seed
+make start   # docker compose up -d --build, then waits until the app is healthy
+make seed    # docker compose exec app python -m app.seed
 ```
+
+`make` lists the other commands: `stop`, `restart`, `down`, `ps`, `logs` (one service with `s=app`), `migrate`, `psql`, `backup` and `restore file=…` (dumps go to the git-ignored `backups/`), `test`, `lint` and `e2e`.
 
 Open <http://localhost:8000> and sign in as one of the seeded people (password `lattice-demo-password`):
 
