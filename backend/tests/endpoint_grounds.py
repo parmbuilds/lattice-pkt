@@ -238,7 +238,6 @@ def g_list_documents(ctx: Ctx) -> None:
 def derived_once(ctx: Ctx, version: dict) -> None:
     """A new draft is chunked and embedded in its request (derive_inline): one span, ready."""
     (derivation,), (chunk,) = ctx.changes.added["derivations"], ctx.changes.added["chunks"]
-    assert ctx.changes.removed["derivations"] == ctx.changes.removed["chunks"] == []
     assert (derivation["version_id"], derivation["status"]) == (version["id"], "ready")
     body = version["body"]
     assert (chunk["version_id"], chunk["config_hash"], chunk["start"], chunk["end"]) == (
@@ -250,10 +249,34 @@ def derived_once(ctx: Ctx, version: dict) -> None:
     assert chunk["sha256"] == sha256(body.encode()).hexdigest()
 
 
+RETAINED = "Version bodies are retained: document versions are immutable."
+
+
+def purged(ctx: Ctx, reason: str, *versions: str) -> None:
+    """The shared document's named versions lost their derived rows, receipted (KTD8)."""
+    shared = ctx.world.docs["shared"]
+    ids = {shared[v] for v in versions}
+    gone = {t: [r["version_id"] for r in ctx.changes.removed[t]] for t in ("derivations", "chunks")}
+    assert set(gone["derivations"]) == set(gone["chunks"]) == ids, gone
+    (receipt,) = [r for r in ctx.audit if r["channel"] == "system"]
+    assert (receipt["actor_user_id"], receipt["action"], str(receipt["document_id"])) == (
+        None,
+        "purge",
+        shared["id"],
+    )
+    removed = {"derivations": len(gone["derivations"]), "chunks": len(gone["chunks"])}
+    assert receipt["detail"] == {
+        "reason": reason,
+        "removed": removed | {"intake_payloads": 0},  # the world's documents are typed
+        "note": RETAINED,
+    }
+
+
 def g_create_document(ctx: Ctx) -> None:
     only(ctx.changes, "documents", "document_versions", "derivations", "chunks")
     (doc,), (version,) = ctx.changes.added["documents"], ctx.changes.added["document_versions"]
     derived_once(ctx, version)
+    assert not any(ctx.changes.removed.values()) and ctx.audit[1:] == []  # nothing to purge
     assert doc["author_id"] == version["created_by"] == ctx.id(ctx.actor)
     assert (doc["serving_version_id"], doc["pending_version_id"]) == (None, version["id"])
     assert (version["title"], version["body"]) == ("Rota", "Who is on call.")
@@ -310,6 +333,7 @@ def g_upload(ctx: Ctx) -> None:
     (doc,), (version,) = ctx.changes.added["documents"], ctx.changes.added["document_versions"]
     derived_once(ctx, version)
     uploaded(ctx, version)
+    assert not any(ctx.changes.removed.values()) and ctx.audit[1:] == []  # nothing to purge
     assert doc["author_id"] == version["created_by"] == ctx.id(ctx.actor)
     assert (version["title"], version["body"]) == ("rota", UPLOADED.decode())
     assert ctx.body == {
@@ -336,6 +360,7 @@ def g_upload_version(ctx: Ctx) -> None:
     (version,) = ctx.changes.added["document_versions"]
     derived_once(ctx, version)
     uploaded(ctx, version)
+    purged(ctx, "replaced", "v2")
     # With no title field, a new version keeps its document's current title.
     assert (version["title"], version["body"]) == ("Checkout runbook v2", UPLOADED.decode())
     old, new = updated_one(ctx, "documents")
@@ -385,6 +410,7 @@ def g_edit(ctx: Ctx) -> None:
     shared = ctx.world.docs["shared"]
     (version,) = ctx.changes.added["document_versions"]
     derived_once(ctx, version)
+    purged(ctx, "replaced", "v2")
     assert ctx.changes.removed["document_versions"] == []  # v2 stays: versions are immutable
     assert (version["title"], version["created_by"]) == ("Runbook v3", ctx.id("author"))
     old, new = updated_one(ctx, "documents")
@@ -409,7 +435,9 @@ def g_review(ctx: Ctx) -> None:
 
 def g_decision(kind: str, reason: str | None = None) -> Callable[[Ctx], None]:
     def ground(ctx: Ctx) -> None:
-        only(ctx.changes, "documents", "version_decisions")
+        only(ctx.changes, "documents", "version_decisions", "derivations", "chunks")
+        superseded = kind == "approved"  # approving v2 supersedes v1; otherwise v2 itself goes
+        purged(ctx, "superseded" if superseded else kind, "v1" if superseded else "v2")
         shared = ctx.world.docs["shared"]
         (decision,) = ctx.changes.added["version_decisions"]
         assert (
@@ -430,7 +458,8 @@ def g_decision(kind: str, reason: str | None = None) -> Callable[[Ctx], None]:
 
 
 def g_withdraw(ctx: Ctx) -> None:
-    only(ctx.changes, "documents")
+    only(ctx.changes, "documents", "derivations", "chunks")
+    purged(ctx, "withdrawn", "v1", "v2")
     old, new = updated_one(ctx, "documents")
     assert old["withdrawn_at"] is None and recent(new["withdrawn_at"])
     assert (old["pending_version_id"], new["pending_version_id"]) == (

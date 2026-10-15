@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import not_found
 from app.config import Settings
+from app.derived import purge_document
 from app.embedding import Embedder
 from app.models import Derivation, Document, DocumentGrant, DocumentVersion, VersionDecision
 from app.policy import DocumentState, Subject
@@ -121,6 +122,7 @@ async def new_draft(
     )
     if result.rowcount == 0:
         raise DOCUMENT_CHANGED
+    await purge_document(db, doc.id, "replaced")
     db.add(
         Derivation(
             workspace_id=doc.workspace_id,
@@ -134,6 +136,10 @@ async def new_draft(
     if settings.derive_inline:  # tests and the seed: ready before the request commits
         await derive.derive(lambda: nullcontext(db), embedder, settings, version.id)
     return version
+
+
+# What a decision did to the version it purges: approve supersedes the old serving version.
+PURGE_REASONS = {"approved": "superseded", "rejected": "rejected", "discarded": "discarded"}
 
 
 async def decide_draft(
@@ -182,6 +188,7 @@ async def decide_draft(
         )
     )
     await db.flush()
+    await purge_document(db, doc.id, PURGE_REASONS[decision])
 
 
 async def withdraw(db: AsyncSession, doc: Document) -> None:
@@ -193,6 +200,7 @@ async def withdraw(db: AsyncSession, doc: Document) -> None:
     )
     if result.rowcount == 0:
         raise DOCUMENT_CHANGED
+    await purge_document(db, doc.id, "withdrawn")
 
 
 def escape_invisible(text: str) -> str:

@@ -80,6 +80,30 @@ async def record(
     await db.flush()
 
 
+async def record_system(
+    db: AsyncSession,
+    workspace_id: UUID,
+    action: str,
+    detail: dict[str, Any],
+    *,
+    document_id: UUID | None = None,
+) -> None:
+    """Write one row the system made on its own, such as a purge receipt (KTD8): no actor,
+    channel 'system', flushed now so a failure undoes the action, like `record`."""
+    db.add(
+        AuditEvent(
+            workspace_id=workspace_id,
+            actor_user_id=None,
+            channel="system",
+            action=action,
+            outcome="allow",
+            document_id=document_id,
+            detail=_bounded(detail),
+        )
+    )
+    await db.flush()
+
+
 async def authorize(
     db: AsyncSession,
     subject: Subject,

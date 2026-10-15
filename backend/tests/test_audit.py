@@ -13,7 +13,15 @@ from app.main import create_app
 from app.models import AuditEvent, Group
 from app.policy import Action
 from tests.conftest import plain_dsn
-from tests.helpers import api_client, seed_workspace, sign_up_and_in, user_id
+from tests.helpers import (
+    add_document,
+    api_client,
+    create_workspace,
+    seed_workspace,
+    sign_up_and_in,
+    signed_in,
+    user_id,
+)
 
 
 def _app_with_probe(settings):
@@ -118,3 +126,22 @@ async def test_requests_from_outside_the_workspace_are_not_written_to_its_trail(
             )
         ).json()["events"]
     assert events == []
+
+
+async def test_managers_see_system_purge_receipts_with_no_actor(settings):
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        doc = await add_document(owner, ws)
+        await owner.post(
+            f"/api/workspaces/{ws}/documents/{doc['id']}/reject",
+            json={"version_id": doc["pending_version_id"]},
+        )
+        response = await owner.get(f"/api/workspaces/{ws}/audit", params={"action": "purge"})
+    assert response.status_code == 200
+    ((event,),) = [response.json()["events"]]
+    assert (event["actor_user_id"], event["channel"], event["document_id"]) == (
+        None,
+        "system",
+        doc["id"],
+    )
+    assert event["detail"]["removed"] == {"derivations": 1, "chunks": 1, "intake_payloads": 0}

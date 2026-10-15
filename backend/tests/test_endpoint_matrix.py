@@ -479,7 +479,8 @@ async def test_endpoint(case: Case, actor: str, settings, pg, app):
             unchanged(Ctx(world, actor, payload, changes, audit, pg))
 
         if actor in MEMBERS and (allowed and case.audited_when_allowed(actor) or not allowed):
-            ((row,),) = [audit]
+            # Purge receipts are the system's own rows; grounds check them (KTD8).
+            ((row,),) = [[r for r in audit if r["channel"] != "system"]]
             assert (str(row["actor_user_id"]), row["action"], row["channel"]) == (
                 world.users[actor],
                 case.action,
