@@ -1,3 +1,4 @@
+import os
 import socket
 import threading
 import time
@@ -10,9 +11,22 @@ import pytest
 import uvicorn
 from alembic import command
 from alembic.config import Config
+from hypothesis import HealthCheck
+from hypothesis import settings as hypothesis_settings
 from testcontainers.community.postgres import PostgresContainer
 
 from app.config import Settings
+
+# Property-test budgets (KTD3): a quick local profile and a larger CI profile.
+for _name, _examples, _steps in (("dev", 8, 20), ("ci", 50, 30)):
+    hypothesis_settings.register_profile(
+        _name,
+        max_examples=_examples,
+        stateful_step_count=_steps,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+    )
+hypothesis_settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 BACKEND = Path(__file__).resolve().parents[1]
 ROLES_SQL = BACKEND.parent / "db" / "init" / "01-roles.sql"
