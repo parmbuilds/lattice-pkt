@@ -109,8 +109,27 @@ export type DocumentSummary = {
   pending_version_id: string | null
 }
 
-export type StampKind = 'approved' | 'draft' | 'withdrawn' | 'superseded' | 'rejected' | 'allow' | 'deny' | 'plain'
+export type StampKind =
+  | 'approved'
+  | 'draft'
+  | 'withdrawn'
+  | 'superseded'
+  | 'rejected'
+  | 'allow'
+  | 'deny'
+  | 'plain'
+  | 'processing'
+  | 'needs-ack'
 export type StampSpec = { kind: StampKind; label: string }
+
+export type Derivation = { status: 'pending' | 'ready' | 'failed'; error: string | null }
+
+// Ready reuses the approved look and failed the rejected one; only "Preparing" is new.
+export function derivationStamp(d: Derivation): StampSpec {
+  if (d.status === 'ready') return { kind: 'approved', label: 'Ready' }
+  if (d.status === 'failed') return { kind: 'rejected', label: 'Derivation failed' }
+  return { kind: 'processing', label: 'Preparing' }
+}
 
 export function documentStamps(d: Pick<DocumentSummary, 'withdrawn' | 'serving_version_id' | 'pending_version_id'>): StampSpec[] {
   if (d.withdrawn) return [{ kind: 'withdrawn', label: 'Withdrawn' }]

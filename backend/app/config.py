@@ -61,7 +61,8 @@ class Settings(BaseSettings):
     extract_max_zip_ratio: int = 100
 
     # Retrieval (KTD5-KTD7); the distance floor is tuned by the real-model benchmark (R24).
-    vector_distance_floor: float = 0.3
+    # Chosen by the real-model benchmark (R24): paraphrases 0.30-0.37, off-topic 0.52-0.56.
+    vector_distance_floor: float = 0.45
     vector_candidates: int = 50
     chunk_max_chars: int = 1200
 

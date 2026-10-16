@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { diffSegments } from '../diff'
-import { type DocumentSummary, useLoad } from '../session'
+import { type Derivation, derivationStamp, type DocumentSummary, useLoad } from '../session'
 import LoadState from './LoadState.vue'
 import Stamp from './Stamp.vue'
 
@@ -13,6 +13,14 @@ type Review = {
   author_id: string
   title: string
   diff: string[]
+  receipt: {
+    flags: { kind: string; location: string; count: number }[]
+    notes?: string[]
+    sha256: string
+    hidden_excerpts: { kind: string; location: string; text: string }[]
+  } | null
+  intake: { filename: string; detected_type: string; parser: string } | null
+  derivation: Derivation
 }
 
 const props = defineProps<{
@@ -24,12 +32,32 @@ const props = defineProps<{
 
 const path = computed(() => `${props.base}/documents/${props.doc.id}`)
 const review = useLoad<Review>(() => `${path.value}/review`)
+// The worker readies drafts in the background: check again until this one is ready (R11),
+// and keep checking through a failed request so one network blip does not end the wait.
+let waiting = false
+watch(
+  () => [review.data, review.error] as const,
+  ([data, error], _old, onCleanup) => {
+    if (data) waiting = data.derivation.status !== 'ready'
+    if (!waiting || (!data && !error)) return
+    const timer = setTimeout(review.reload, 2000)
+    onCleanup(() => clearTimeout(timer))
+  },
+)
 const segments = computed(() => diffSegments(review.data?.diff ?? []).filter((s) => s.kind !== 'file'))
 const reason = ref('')
+const acknowledged = ref(false)
+const flagged = computed(() => !!review.data?.receipt?.flags.length)
+const blocker = computed(() => {
+  if (review.data?.derivation.status !== 'ready') return 'Approve unlocks once the draft is ready for search.'
+  if (flagged.value && !acknowledged.value) return 'Acknowledge the receipt flags to approve.'
+  return ''
+})
 
 function approve(r: Review) {
+  const body = { version_id: r.pending_version_id, acknowledged_receipt: r.receipt?.sha256 ?? null }
   return props.decide(
-    () => api(`${path.value}/approve`, 'POST', { version_id: r.pending_version_id }),
+    () => api(`${path.value}/approve`, 'POST', body),
     `Approved "${r.title}"; it is now the serving version.`,
   )
 }
@@ -52,8 +80,40 @@ function reject(r: Review) {
           By {{ doc.author_name }}. {{ doc.serving_version_id ? 'Replaces the approved version.' : 'First version.' }}
         </p>
       </div>
-      <Stamp kind="draft">Awaiting approval</Stamp>
+      <span class="flex flex-wrap gap-1">
+        <Stamp kind="draft">Awaiting approval</Stamp>
+        <Stamp v-if="review.data" :kind="derivationStamp(review.data.derivation).kind">
+          {{ derivationStamp(review.data.derivation).label }}
+        </Stamp>
+      </span>
     </header>
+
+    <section v-if="review.data?.receipt" class="grid gap-3 border-b border-rule px-5 py-4" aria-label="Extraction receipt">
+      <p class="flex flex-wrap items-center gap-2 text-sm text-graphite">
+        <Stamp v-if="flagged" kind="needs-ack">Needs acknowledgement</Stamp>
+        <span v-if="review.data.intake">
+          Uploaded from <code>{{ review.data.intake.filename }}</code> ({{ review.data.intake.detected_type }}, read by
+          {{ review.data.intake.parser }})
+        </span>
+      </p>
+      <ul v-if="review.data.receipt.flags.length" class="list-disc pl-5 text-sm">
+        <li v-for="(f, i) in review.data.receipt.flags" :key="i">{{ f.kind }} at {{ f.location }} ({{ f.count }})</li>
+      </ul>
+      <ul v-if="review.data.receipt.notes?.length" class="text-sm text-muted">
+        <li v-for="n in review.data.receipt.notes" :key="n">Note: {{ n }}</li>
+      </ul>
+      <div v-if="review.data.receipt.hidden_excerpts.length">
+        <h3 class="caps text-graphite">Hidden content left out of the draft</h3>
+        <div v-for="(h, i) in review.data.receipt.hidden_excerpts" :key="i" class="mt-2">
+          <p class="text-xs text-muted">{{ h.kind }} at {{ h.location }}</p>
+          <pre class="overflow-x-auto rounded-[3px] border border-rule bg-white px-3 py-2 text-[0.8125rem]">{{ h.text }}</pre>
+        </div>
+      </div>
+      <label v-if="flagged" class="flex items-center gap-2 text-sm font-medium">
+        <input v-model="acknowledged" type="checkbox" />
+        I reviewed these flags and the hidden content.
+      </label>
+    </section>
 
     <div class="px-5 py-4">
       <LoadState :load="review" :empty="!review.data?.diff.length" empty-text="No text changes." />
@@ -76,7 +136,8 @@ function reject(r: Review) {
     </div>
 
     <footer v-if="review.data" class="flex flex-wrap items-end gap-3 border-t border-rule bg-film/60 px-5 py-4">
-      <button type="button" class="btn btn-primary" @click="approve(review.data)">Approve</button>
+      <button type="button" class="btn btn-primary" :disabled="!!blocker" @click="approve(review.data)">Approve</button>
+      <p v-if="blocker" class="self-center text-sm text-graphite">{{ blocker }}</p>
       <label class="field min-w-60 flex-1">
         Rejection reason (optional)
         <input v-model="reason" class="input" maxlength="500" />

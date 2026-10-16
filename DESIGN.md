@@ -199,7 +199,7 @@ Nearly square. Stamps take 2px corners, controls 3px, sheets 4px. Borders do the
 
 ### Stamps (signature)
 - **Style:** condensed caps label in a 22px box with a 1.5px current-colour border; 28px in the large size.
-- **States:** Approved and Serving (solid, approved ink), Draft and Edit pending (dashed, draft ink), Withdrawn and Revoked (struck, muted), Superseded and Not approved (hairline, muted), Rejected and Deny (solid, redline ink), Allow (solid, approved ink).
+- **States:** Approved and Serving (solid, approved ink), Draft and Edit pending (dashed, draft ink), Withdrawn and Revoked (struck, muted), Superseded and Not approved (hairline, muted), Rejected and Deny (solid, redline ink), Allow (solid, approved ink). Derivation reuses these: Ready (approved) and Derivation failed (rejected), plus Preparing (hairline, graphite, no tint). Needs acknowledgement marks a flagged extraction receipt (dashed, draft ink, no tint).
 
 ### Title block (signature)
 - **Style:** a two-column ruled grid in a 1.5px ink frame; the ink shows through 1px gaps, so every rule is exact whatever cells span. Each cell holds a condensed caps label over a medium value.
@@ -237,4 +237,4 @@ Nearly square. Stamps take 2px corners, controls 3px, sheets 4px. Borders do the
 - **Don't** use red for anything but changes and refusals.
 - **Don't** use shadows, gradients or glass.
 - **Don't** put a label or eyebrow above a heading; condensed caps belong to labels for values, table headers, stamps and nav groups.
-- **Don't** show or imply features Lattice does not have (citations, vector search, file upload, SSO).
+- **Don't** show or imply features Lattice does not have (OCR, original-file download, the graph over MCP, SSO).

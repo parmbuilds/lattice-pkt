@@ -24,7 +24,7 @@ from hypothesis.stateful import (
     rule,
     run_state_machine_as_test,
 )
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 import app.policy as policy_module
 import app.services.search as search_module
@@ -32,6 +32,7 @@ from app.auth import load_subject
 from app.main import create_app
 from app.models import DocumentVersion
 from app.policy import Action, DocumentState, decide, readable_versions
+from app.services import graph
 from app.services.documents import DERIVATIONS_NOT_READY
 from app.services.search import search
 from tests import reference_model as ref
@@ -138,6 +139,12 @@ class PolicyMachine(RuleBasedStateMachine):
                         f"{self.user_ids[member]}",
                     )
                     self.world.groups[group][1].add(self.user_ids[member])
+            # Every body contains TERM, so the graph mentions each version a person may read.
+            for ws, owner in (("A", "owner_a"), ("B", "owner_b")):
+                created = await self._call(
+                    owner, "POST", f"/api/workspaces/{self.ws[ws]}/entities", json={"name": TERM}
+                )
+                self.world.entities[uuid.UUID(created.json()["id"])] = (self.ws[ws], [TERM])
 
         self.run(go())
 
@@ -154,15 +161,17 @@ class PolicyMachine(RuleBasedStateMachine):
         ws = self._ws_of(author)
         if (self.ws[ws], self.user_ids[author]) not in self.world.roles or len(self.docs) >= 8:
             return
+        body = f"{TERM} {uuid.uuid4().hex}"
         created = self.run(
             self._call(
                 author,
                 "POST",
                 f"/api/workspaces/{self.ws[ws]}/documents",
-                json={"title": f"Doc by {author}", "body": f"{TERM} {uuid.uuid4().hex}"},
+                json={"title": f"Doc by {author}", "body": body},
             )
         ).json()
         doc_id, version = uuid.UUID(created["id"]), uuid.UUID(created["pending_version_id"])
+        self.world.bodies[version] = body
         self.docs[doc_id] = {"ws": ws, "pending": version}
         self.ready.add(version)
         self.world.documents[doc_id] = {
@@ -198,16 +207,13 @@ class PolicyMachine(RuleBasedStateMachine):
             self.world.roles
         ):
             return  # the author left; only a reassigned author could edit
+        body = f"{TERM} {uuid.uuid4().hex}"
         response = self.run(
-            self._call(
-                author,
-                "PUT",
-                self._url(doc_id),
-                json={"title": "Edited", "body": f"{TERM} {uuid.uuid4().hex}"},
-            )
+            self._call(author, "PUT", self._url(doc_id), json={"title": "Edited", "body": body})
         )
         assert response.status_code == 200, response.text
         version = uuid.UUID(response.json()["pending_version_id"])
+        self.world.bodies[version] = body
         self.docs[doc_id]["pending"] = version
         self.ready.add(version)
         self.world.documents[doc_id]["versions"].add(version)
@@ -413,6 +419,16 @@ class PolicyMachine(RuleBasedStateMachine):
                         want_retrieve & self.ready
                     ), ("vector search", label)
                     await _check_spans(db, via_mcp + via_vector)
+                    # The graph sees exactly the mentions in versions this person may read (R22).
+                    got_mentions = {
+                        (m["entity_id"], m["term"], m["version_id"], m["start"], m["end"])
+                        for m in await graph.mentions(db, subject)
+                        if m["version_id"] in seeded
+                    }
+                    assert got_mentions == ref.visible_mentions(self.world, ws, uid), (
+                        "graph",
+                        label,
+                    )
 
 
 async def _check_spans(db, results) -> None:
@@ -496,6 +512,25 @@ def test_the_property_catches_a_vector_path_that_skips_the_read_clause(settings,
         machine.every_read_path_agrees_with_the_reference_model()  # still fine
         machine.create_document("m1")  # a draft nobody may retrieve, but it has vectors
         with pytest.raises(AssertionError):
+            machine.every_read_path_agrees_with_the_reference_model()
+    finally:
+        machine.teardown()
+
+
+@pytest.mark.property
+def test_the_property_catches_a_graph_that_skips_the_read_clause(settings, pg, monkeypatch):
+    """Match mentions across the whole workspace instead of readable versions: must fail."""
+
+    def workspace_only(subject, action, d, v):
+        return and_(d.c.workspace_id == subject.workspace_id, v.c.document_id == d.c.id)
+
+    monkeypatch.setattr(graph, "read_clause", workspace_only)
+    machine = PolicyMachine(settings, pg)
+    try:
+        machine.setup()
+        machine.every_read_path_agrees_with_the_reference_model()  # no documents yet
+        machine.create_document("m1")  # a draft nobody may retrieve, but its body names TERM
+        with pytest.raises(AssertionError, match="graph"):
             machine.every_read_path_agrees_with_the_reference_model()
     finally:
         machine.teardown()

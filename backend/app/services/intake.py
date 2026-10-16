@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import cookie_parser
 
 from app import security
+from app.audit import MAX_TEXT  # intakes check filename and reason lengths against it
 from app.auth import cookie_name, reject
 from app.config import Settings
 from app.db import CommitThenRaise
@@ -19,7 +20,6 @@ from app.models import Document, DocumentVersion, Intake, IntakePayload
 from app.policy import Subject
 from app.services.documents import MAX_TITLE
 
-MAX_TEXT = 256  # intakes check filename and reason lengths
 UPLOAD_PATH = re.compile(r"/api/workspaces/[^/]+/documents/upload")
 
 RECEIPT_NOT_ACKNOWLEDGED = HTTPException(

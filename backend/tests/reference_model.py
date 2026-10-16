@@ -8,6 +8,7 @@ Re-implements, in plain Python over plain data, the Product Contract's read rule
 - R19: retrieval returns only the serving version of a non-withdrawn document.
 """
 
+import re
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -20,6 +21,9 @@ class World:
     groups: dict[UUID, tuple[UUID, set[UUID]]] = field(default_factory=dict)
     # document_id -> {workspace, author, serving, withdrawn, versions, group_grants, user_grants}
     documents: dict[UUID, dict] = field(default_factory=dict)
+    # version_id -> body; entity_id -> (workspace_id, [name, *aliases])  (R22)
+    bodies: dict[UUID, str] = field(default_factory=dict)
+    entities: dict[UUID, tuple[UUID, list[str]]] = field(default_factory=dict)
 
 
 def _can_see_document(world: World, workspace: UUID, user: UUID, doc: dict) -> str | None:
@@ -54,3 +58,21 @@ def retrievable_versions(world: World, workspace: UUID, user: UUID) -> set[UUID]
         if _can_see_document(world, workspace, user, doc):
             result.add(doc["serving"])
     return result
+
+
+def visible_mentions(
+    world: World, workspace: UUID, user: UUID
+) -> set[tuple[UUID, str, UUID, int, int]]:
+    """(entity, term, version, start, end) for each whole-word, case-insensitive literal match
+    of a name or alias in a version the user may retrieve (R22, KTD14)."""
+    found = set()
+    for version in retrievable_versions(world, workspace, user):
+        body = world.bodies.get(version, "")
+        for entity, (ws, terms) in world.entities.items():
+            if ws != workspace:
+                continue
+            for term in terms:
+                pattern = rf"(?<!\w){re.escape(term)}(?!\w)"
+                for m in re.finditer(pattern, body, re.IGNORECASE):
+                    found.add((entity, term, version, m.start(), m.end()))
+    return found

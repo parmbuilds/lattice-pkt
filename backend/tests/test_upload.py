@@ -86,6 +86,9 @@ async def test_a_clean_markdown_upload_becomes_an_unshared_draft_with_its_intake
             "md",
         )
         assert receipt["flags"] == [] and len(receipt_sha) == 64
+        detail = (await member.get(f"/api/workspaces/{ws}/documents/{created['id']}")).json()
+        assert detail["intakes"][version]["filename"] == "rota.md"
+        assert detail["intakes"][version]["detected_type"] == "md"
         ((original, hidden),) = sql(
             pg,
             "SELECT original, hidden_excerpts FROM intake_payloads WHERE version_id = %s",

@@ -390,9 +390,10 @@ def g_get_document(ctx: Ctx) -> None:
         }
         ready = {"status": "ready", "error": None}
         assert ctx.body["derivations"] == {shared["v2"]: ready, shared["v1"]: ready}
+        assert ctx.body["intakes"] == {}  # the known world's documents were typed, not uploaded
     else:
         assert ctx.body["pending_version_id"] is None and "versions" not in ctx.body
-        assert "derivations" not in ctx.body
+        assert "derivations" not in ctx.body and "intakes" not in ctx.body
 
 
 def g_version(version: str) -> Callable[[Ctx], None]:
@@ -565,3 +566,63 @@ def g_revoke_token(ctx: Ctx) -> None:
     only(ctx.changes, "access_tokens")
     old, new = updated_one(ctx, "access_tokens")
     assert old["id"] == ctx.world.tokens[ctx.actor] and recent(new["revoked_at"])
+
+
+# --- Entities ----------------------------------------------------------------------------------
+
+# Readable mentions of "checkout"/"payments", written out from the world (R22).
+_MENTIONED = {
+    "owner": {"shared", "private"},
+    "admin": {"shared", "private"},
+    "author": {"shared"},
+    "reader": {"shared"},
+    "other": {"private"},
+}
+
+
+def _aliases_seen(actor: str) -> list[str]:
+    return ["payments"] if "private" in _MENTIONED[actor] else []
+
+
+def g_entities(ctx: Ctx) -> None:
+    unchanged(ctx)
+    assert ctx.body["entities"] == [
+        {"id": ctx.world.entity, "name": "checkout", "aliases": _aliases_seen(ctx.actor)}
+    ]
+
+
+def g_entity(ctx: Ctx) -> None:
+    unchanged(ctx)
+    want = {ctx.world.docs[name]["v1"] for name in _MENTIONED[ctx.actor]}
+    assert {m["version_id"] for m in ctx.body["mentions"]} == want
+    assert ctx.body["aliases"] == _aliases_seen(ctx.actor) and ctx.body["co_mentions"] == []
+    for mention in ctx.body["mentions"]:
+        _, body = doc_row(ctx, mention["version_id"])
+        for span in mention["spans"]:
+            assert body[span["start"] : span["end"]].lower() == span["term"]
+    (row,) = ctx.audit
+    assert {str(v) for v in row["returned_version_ids"]} == want
+
+
+def g_new_entity(ctx: Ctx) -> None:
+    only(ctx.changes, "entities", "entity_aliases")
+    (row,) = ctx.changes.added["entities"]
+    (alias,) = ctx.changes.added["entity_aliases"]
+    assert (row["id"], row["name"], alias["entity_id"], alias["alias"]) == (
+        ctx.body["id"],
+        "ledger",
+        ctx.body["id"],
+        "books",
+    )
+
+
+def g_rename_entity(ctx: Ctx) -> None:
+    only(ctx.changes, "entities")
+    old, new = updated_one(ctx, "entities")
+    assert (old["name"], new["name"]) == ("checkout", "till") and ctx.body["name"] == "till"
+
+
+def g_delete_entity(ctx: Ctx) -> None:
+    only(ctx.changes, "entities", "entity_aliases")
+    assert [r["id"] for r in ctx.changes.removed["entities"]] == [ctx.world.entity]
+    assert [r["alias"] for r in ctx.changes.removed["entity_aliases"]] == ["payments"]

@@ -18,6 +18,7 @@ from app.mcp_server import build_mcp, transport_security
 from app.routers import audit as audit_routes
 from app.routers import auth as auth_routes
 from app.routers import documents as document_routes
+from app.routers import entities as entity_routes
 from app.routers import groups as group_routes
 from app.routers import search as search_routes
 from app.routers import tokens as token_routes
@@ -95,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         group_routes,
         document_routes,
         search_routes,
+        entity_routes,
         token_routes,
     ):
         app.include_router(module.router)

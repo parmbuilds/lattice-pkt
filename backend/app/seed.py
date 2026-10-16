@@ -29,6 +29,7 @@ MEI = Person("Mei Engineer", "mei@lattice.demo", "member")
 SAM = Person("Sam Contractor", "sam@lattice.demo", "member")
 PEOPLE = (OWNER, ADMIN, MEI, SAM)
 GROUPS = {"Platform": [MEI], "Payments": [SAM]}
+ENTITIES = ("payments-gateway", "checkout", "checkout-api")
 
 ARCHITECTURE = """Checkout service architecture
 
@@ -202,6 +203,8 @@ async def seed(settings: Settings) -> dict | None:
                 },
             )
         )
+        for name in ENTITIES:
+            await _ok(await owner.post(f"{base}/entities", json={"name": name}))
         return {"workspace_id": ws, "people": [p.email for p in PEOPLE]}
     finally:
         for client in clients.values():

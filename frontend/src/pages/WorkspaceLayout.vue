@@ -16,6 +16,7 @@ const sections = computed(() => [
     links: [
       ['documents', 'Documents'],
       ['search', 'Search'],
+      ['entities', 'Entities'],
     ],
   },
   { label: 'Agents', links: [['tokens', 'Tokens']] },

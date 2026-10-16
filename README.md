@@ -2,7 +2,7 @@
 
 A governed knowledge store for AI agents. Teams add documents, an admin approves them, and agents retrieve only approved knowledge the person behind them is allowed to read, through MCP. Every decision is recorded in an audit trail.
 
-This repository is the authorization foundation: workspaces, roles, groups, a document lifecycle with approval, policy-filtered search, a retrieval-only MCP endpoint and the audit trail. Vector retrieval, file ingestion and citations build on it later.
+This repository holds the authorization foundation (workspaces, roles, groups, a document lifecycle with approval, policy-filtered search, a retrieval-only MCP endpoint and the audit trail) and the document ingestion built on it: file upload with extraction receipts, hybrid keyword and vector search with checkable evidence spans, and a query-time entity graph in the UI.
 
 ## Quick start
 
@@ -84,7 +84,13 @@ CI runs the backend tests, the property suite and the frontend build and tests o
 | MCP endpoint with personal access tokens | Implemented and tested over HTTP; Claude Code connection checked by hand |
 | Audit trail, fail-closed | Implemented and tested |
 | Web UI for every flow | Implemented; component tests plus a manual end-to-end check |
-| Vector and hybrid retrieval, file ingestion, citations | Deferred |
+| Upload of Markdown, text, HTML, text-layer PDF and DOCX into drafts, with extraction receipts that flagged uploads need acknowledged | Implemented and tested |
+| Derivation ledger (chunks and embeddings per version); approve waits until a draft is ready | Implemented and tested |
+| Purge of derivatives when a version stops serving, with a receipt in the audit trail | Implemented and tested |
+| Hybrid search (keywords plus embeddings, reciprocal rank fusion) with evidence spans; MCP `get_evidence` returns a span by `start` and `end` | Implemented and tested, including the property suite |
+| Entity registry and a query-time, policy-filtered entity graph in the UI | Implemented and tested |
+| Retrieval and lifecycle benchmark on the synthetic corpus | Implemented; `pytest -m benchmark` |
+| OCR for scanned PDFs, an approximate vector index, LLM entity extraction or community reports, the graph over MCP, original-file download, zip or folder upload | Deferred |
 | MCP OAuth authorization server | Deferred |
 | Agent accounts, scoped delegation, folders, nested groups, SSO | Deferred |
 | Cloud deployment | Not attempted |
@@ -97,6 +103,8 @@ cd backend
 uv sync
 uv run pytest -m "not property"   # fast suite
 uv run pytest -m property         # equivalence property tests
+uv run pytest -m benchmark -s     # retrieval and lifecycle benchmark gates
+FASTEMBED_CACHE_PATH=... uv run pytest -m benchmark_model -s   # real-model gate, needs a warmed cache
 uv run ruff check .
 
 # Frontend (Node 24)
@@ -110,6 +118,10 @@ npm run e2e    # browser tests against the running stack (compose up + seed)
 
 Run the API locally against the Compose database with `LATTICE_INSECURE_DEV_COOKIES=true uv run uvicorn --factory app.main:create_app --reload` after `uv run alembic upgrade head`. Without a private `LATTICE_SECRET_PEPPER`, the app starts only in this local development mode; settings are read from `LATTICE_*` environment variables (see [`backend/app/config.py`](backend/app/config.py)).
 
+The database image is `pgvector/pgvector:pg18`. A `pgdata` volume created before pgvector has no `vector` extension and the migration stops with a message: run `docker compose down -v` to start fresh, or run `CREATE EXTENSION vector;` once in the `lattice` database as the `postgres` superuser.
+
+Embeddings come from fastembed (`BAAI/bge-small-en-v1.5`). The image build downloads the model into `FASTEMBED_CACHE_PATH` (`/app/models`), checks it against a pinned hash, and runs with `HF_HUB_OFFLINE=1`, so the app never reaches the network for it. Outside the image, warm a cache once with `FASTEMBED_CACHE_PATH=<dir> uv run python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"` and point `FASTEMBED_CACHE_PATH` at it; the default tests use a deterministic fake embedder and skip `benchmark_model` unless it is selected.
+
 ## Layout
 
 ```text
@@ -117,6 +129,13 @@ backend/app/policy.py      every authorization rule
 backend/app/audit.py       decisions and the audit trail
 backend/app/routers/       REST API
 backend/app/services/      document lifecycle, search, membership
+  intake.py                uploads into drafts and receipt acknowledgement
+  derive.py                chunking and embedding of every live version
+  graph.py                 query-time entity graph
+backend/app/ingest/        file sniffing, per-format extractors, extraction receipts
+backend/app/derived.py     derived tables and purge receipts
+backend/app/embedding.py   the embedder seam (fastembed, or a fake for tests)
+backend/app/routers/entities.py  entity registry API
 backend/app/mcp_server.py  MCP endpoint and token verification
 backend/app/seed.py        demo data
 frontend/src/              Vue UI (design system: DESIGN.md)

@@ -12,9 +12,17 @@ const docs = useLoad<{ documents: DocumentSummary[] }>(() => (w.manager ? `${w.b
 const { message, run } = useAction()
 const pending = computed(() => docs.data?.documents.filter((d) => d.pending_version_id) ?? [])
 
+// Server 409 details (services/documents.py, services/intake.py) mapped to what to do next.
+const conflicts: Record<string, string> = {
+  'This draft is still being prepared for search. Try again shortly.':
+    'Refused: this draft is still being prepared for search. Approve it once it shows Ready.',
+  "This draft's extraction receipt has flags. Review it and acknowledge that receipt.":
+    'Refused: the extraction receipt has flags. Review them and tick the acknowledgement before approving.',
+}
 const staleRefusal = (e: unknown) =>
   e instanceof ApiError && e.status === 409
-    ? 'Refused: this draft was replaced or already decided. The current pending drafts have been reloaded.'
+    ? (conflicts[e.message] ??
+      'Refused: this draft was replaced or already decided. The current pending drafts have been reloaded.')
     : errorText(e)
 
 // Reload after every decision, refused or not, so a replaced draft is fetched again.
