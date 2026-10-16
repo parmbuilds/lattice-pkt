@@ -228,7 +228,7 @@ describe('Documents upload', () => {
     const w = await renderPage('/w/ws1/documents', '/w/:workspaceId/documents', Documents, 'member', [
       { path: DOC_DETAIL, component: Documents },
     ])
-    await w.findAll('button').find((b) => b.text() === 'Upload file')!.trigger('click')
+    await w.findAll('button').find((b) => b.text() === 'Upload files')!.trigger('click')
     await fileInput(w, md)
     await w.find('form').trigger('submit')
     await flushPromises()
@@ -251,7 +251,7 @@ describe('Documents upload', () => {
     const w = await renderPage('/w/ws1/documents', '/w/:workspaceId/documents', Documents, 'member', [
       { path: DOC_DETAIL, component: Documents },
     ])
-    await w.findAll('button').find((b) => b.text() === 'Upload file')!.trigger('click')
+    await w.findAll('button').find((b) => b.text() === 'Upload files')!.trigger('click')
     await fileInput(w, md)
     await w.find('form').trigger('submit')
     await flushPromises()
@@ -260,6 +260,39 @@ describe('Documents upload', () => {
     await flushPromises()
     expect(posted[1].get('new_document')).toBe('true')
     expect(w.vm.$router.currentRoute.value.fullPath).toBe('/w/ws1/documents/d2')
+  })
+
+  it('uploads several files one at a time and resolves a title match per file', async () => {
+    const posted: string[] = []
+    mockApi({
+      [`GET ${BASE}`]: { documents: [] },
+      [`POST ${BASE}/upload`]: (init: RequestInit) => {
+        const form = init.body as FormData
+        posted.push(`${(form.get('file') as File).name}${form.get('new_document') ? '+new' : ''}`)
+        if (posted.length === 1) return new Reply(201, { ...draft, id: 'd1', created: true })
+        if (posted.length === 2) return new Reply(409, { detail: 'Title match.', suggest_document_id: 'd9' })
+        return new Reply(201, { ...draft, id: 'd3', created: true })
+      },
+    })
+    const w = await renderPage('/w/ws1/documents', '/w/:workspaceId/documents', Documents, 'member', [
+      { path: DOC_DETAIL, component: Documents },
+    ])
+    await w.findAll('button').find((b) => b.text() === 'Upload files')!.trigger('click')
+    const input = w.find('input[type="file"]')
+    const files = [new File(['# A'], 'a.md'), new File(['# B'], 'b.md'), new File(['x'], 'photo.png')]
+    Object.defineProperty(input.element, 'files', { value: files })
+    await input.trigger('change')
+    expect(document.body.textContent).toContain('2 files to upload')
+    expect(document.body.textContent).toContain('1 skipped')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(posted).toEqual(['a.md', 'b.md'])
+    expect(document.body.textContent).toContain('2 of 2 uploaded: 1 new, 0 already uploaded, 1 need a choice, 0 refused.')
+    await w.find('button[aria-label="Keep b.md separate"]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual(['a.md', 'b.md', 'b.md+new'])
+    expect(document.body.textContent).toContain('2 new')
+    expect(w.vm.$router.currentRoute.value.fullPath).toBe('/w/ws1/documents')
   })
 
   it('routes a duplicate to the existing document with the already-uploaded message', async () => {
@@ -271,7 +304,7 @@ describe('Documents upload', () => {
     const w = await renderPage('/w/ws1/documents', '/w/:workspaceId/documents', Documents, 'member', [
       { path: DOC_DETAIL, component: DocumentDetail },
     ])
-    await w.findAll('button').find((b) => b.text() === 'Upload file')!.trigger('click')
+    await w.findAll('button').find((b) => b.text() === 'Upload files')!.trigger('click')
     await fileInput(w, md)
     await w.find('form').trigger('submit')
     await flushPromises()
@@ -302,8 +335,8 @@ describe('Documents upload', () => {
       [`POST ${BASE}/upload`]: new Reply(415, { detail: 'This file type is not supported.' }),
     })
     const w = await renderPage('/w/ws1/documents', '/w/:workspaceId/documents', Documents, 'member')
-    await w.findAll('button').find((b) => b.text() === 'Upload file')!.trigger('click')
-    await fileInput(w, new File(['x'], 'a.exe'))
+    await w.findAll('button').find((b) => b.text() === 'Upload files')!.trigger('click')
+    await fileInput(w, new File(['MZ'], 'a.pdf'))
     await w.find('form').trigger('submit')
     await flushPromises()
     expect(document.body.textContent).toContain('This file type is not supported.')

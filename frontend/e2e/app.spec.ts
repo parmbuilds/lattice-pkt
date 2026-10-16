@@ -1,4 +1,7 @@
 import { type Browser, expect, type Page, test } from '@playwright/test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 const PASSWORD = 'lattice-demo-password'
 
@@ -235,7 +238,7 @@ test('an uploaded Markdown file is approved, found by search and shown on its en
   await expect(page).toHaveURL(/\/w\/[^/]+\/documents$/)
 
   // Upload a Markdown file; it becomes a draft.
-  await page.getByRole('button', { name: 'Upload file' }).click()
+  await page.getByRole('button', { name: 'Upload files' }).click()
   await page.getByLabel('File').setInputFiles({
     name: `runbook-${run}.md`,
     mimeType: 'text/markdown',
@@ -267,5 +270,54 @@ test('an uploaded Markdown file is approved, found by search and shown on its en
   await expect(page.getByRole('region', { name: 'Mentions' }).getByRole('link')).toHaveCount(1)
   await expect(page.getByRole('region', { name: 'Mentions' })).toContainText(word)
 
+  expect(problems).toEqual([])
+})
+
+test('several files, a folder and a dropped file upload as separate drafts', async ({ browser }) => {
+  const run = Date.now().toString(36)
+  const { page, problems } = await newPage(browser)
+  await page.goto('/signup')
+  await page.getByLabel('Name').fill('E2E Batch')
+  await page.getByLabel('Email').fill(`e2e-batch-${run}@lattice.test`)
+  await page.getByLabel('Password (8 or more characters)').fill('e2e-batch-password')
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.getByLabel('Workspace name').fill(`E2E batch ${run}`)
+  await page.getByRole('button', { name: 'Create workspace' }).click()
+  await expect(page).toHaveURL(/\/w\/[^/]+\/documents$/)
+  await page.getByRole('button', { name: 'Upload files' }).click()
+  const md = (name: string, text: string) => ({ name, mimeType: 'text/markdown', buffer: Buffer.from(`# ${text}\n\nBody of ${text}.\n`) })
+
+  // Several files at once.
+  await page.getByLabel('Files').setInputFiles([md(`alpha-${run}.md`, `Alpha ${run}`), md(`beta-${run}.md`, `Beta ${run}`)])
+  await page.getByRole('button', { name: 'Upload 2 files' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'uploaded' })).toHaveText('2 of 2 uploaded: 2 new, 0 already uploaded, 0 need a choice, 0 refused.')
+
+  // A folder, walked recursively; hidden files are ignored and other types listed as skipped.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lattice-folder-'))
+  fs.mkdirSync(path.join(dir, 'sub'))
+  fs.writeFileSync(path.join(dir, `gamma-${run}.md`), `# Gamma ${run}\n\nBody.\n`)
+  fs.writeFileSync(path.join(dir, 'sub', `delta-${run}.txt`), `Delta ${run}\n\nBody.\n`)
+  fs.writeFileSync(path.join(dir, '.DS_Store'), 'x')
+  fs.writeFileSync(path.join(dir, 'photo.png'), 'x')
+  await page.getByLabel('Folder').setInputFiles(dir)
+  await expect(page.getByText('2 files to upload')).toBeVisible()
+  await expect(page.getByText('1 skipped')).toBeVisible()
+  await page.getByRole('button', { name: 'Upload 2 files' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'uploaded' })).toHaveText('2 of 2 uploaded: 2 new, 0 already uploaded, 0 need a choice, 0 refused.')
+
+  // Files dropped anywhere on the page are taken, not opened by the browser.
+  await page.evaluate((name) => {
+    const data = new DataTransfer()
+    data.items.add(new File([`# Epsilon\n\nBody.\n`], name, { type: 'text/markdown' }))
+    document.body.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }))
+    document.body.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }))
+  }, `epsilon-${run}.md`)
+  await expect(page.getByText('1 file to upload')).toBeVisible()
+  await page.getByRole('button', { name: 'Upload', exact: true }).click()
+  await expect(page).toHaveURL(/\/documents\/[^/]+$/)
+
+  await nav(page, 'Documents').click()
+  await expect(page.getByRole('button', { name: /^All/ })).toContainText('5')
   expect(problems).toEqual([])
 })

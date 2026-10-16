@@ -9,9 +9,13 @@ This repository holds the authorization foundation (workspaces, roles, groups, a
 Requirements: Docker.
 
 ```bash
-docker compose up --build
-docker compose exec app python -m app.seed
+make start   # docker compose up -d --build, then waits until the app is healthy
+make seed    # docker compose exec app python -m app.seed
 ```
+
+For development, `make dev` keeps the database in Docker and runs the API (uvicorn `--reload`) and the UI (Vite) on your machine at <http://localhost:5173>, both reloading on save; Ctrl-C stops both and `make start` switches back to the Docker app. The first run downloads the embedding model into the git-ignored `.cache/fastembed`.
+
+`make` lists the other commands: `stop`, `restart`, `down`, `ps`, `logs` (one service with `s=app`), `migrate`, `psql`, `backup` and `restore file=…` (dumps go to the git-ignored `backups/`), `test`, `lint` and `e2e`.
 
 Open <http://localhost:8000> and sign in as one of the seeded people (password `lattice-demo-password`):
 
@@ -84,13 +88,13 @@ CI runs the backend tests, the property suite and the frontend build and tests o
 | MCP endpoint with personal access tokens | Implemented and tested over HTTP; Claude Code connection checked by hand |
 | Audit trail, fail-closed | Implemented and tested |
 | Web UI for every flow | Implemented; component tests plus a manual end-to-end check |
-| Upload of Markdown, text, HTML, text-layer PDF and DOCX into drafts, with extraction receipts that flagged uploads need acknowledged | Implemented and tested |
+| Upload of Markdown, text, HTML, text-layer PDF and DOCX into drafts (single files, several files, folders or drag and drop), with extraction receipts that flagged uploads need acknowledged | Implemented and tested |
 | Derivation ledger (chunks and embeddings per version); approve waits until a draft is ready | Implemented and tested |
 | Purge of derivatives when a version stops serving, with a receipt in the audit trail | Implemented and tested |
 | Hybrid search (keywords plus embeddings, reciprocal rank fusion) with evidence spans; MCP `get_evidence` returns a span by `start` and `end` | Implemented and tested, including the property suite |
 | Entity registry and a query-time, policy-filtered entity graph in the UI | Implemented and tested |
 | Retrieval and lifecycle benchmark on the synthetic corpus | Implemented; `pytest -m benchmark` |
-| OCR for scanned PDFs, an approximate vector index, LLM entity extraction or community reports, the graph over MCP, original-file download, zip or folder upload | Deferred |
+| OCR for scanned PDFs, an approximate vector index, LLM entity extraction or community reports, the graph over MCP, original-file download, zip upload | Deferred |
 | MCP OAuth authorization server | Deferred |
 | Agent accounts, scoped delegation, folders, nested groups, SSO | Deferred |
 | Cloud deployment | Not attempted |
