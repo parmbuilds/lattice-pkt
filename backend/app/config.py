@@ -2,10 +2,42 @@ from datetime import timedelta
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEV_PEPPER = "dev-pepper-change-me"
+# Published development master key for AI provider keys; refused like DEV_PEPPER (KTD15).
+DEV_AI_KEY = "bGF0dGljZS1kZXYtYWkta2V5LW5vdC1zZWNyZXQhISE="
+
+
+class AiModel(BaseModel):
+    """A model the operator offers on a provider, with the limits Lattice budgets against."""
+
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    context_tokens: int = Field(gt=0)
+    max_output_tokens: int = Field(gt=0)
+
+
+class AiProvider(BaseModel):
+    """One operator-approved OpenAI-compatible provider (R1); owners never enter a URL (R3)."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    label: str = Field(min_length=1)
+    kind: Literal["openai", "fake"] = "openai"
+    base_url: str = ""
+    # A closed set, so the key can only ever travel in one of these headers (KTD9).
+    auth: Literal["bearer", "api-key"] = "bearer"
+    models: list[AiModel] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _https_unless_fake(self) -> "AiProvider":
+        if self.kind == "openai" and not self.base_url.startswith("https://"):
+            raise ValueError(f"provider {self.id}: base_url must use https")
+        return self
+
+    def model(self, model_id: str) -> AiModel | None:
+        return next((m for m in self.models if m.id == model_id), None)
 
 
 class Settings(BaseSettings):
@@ -73,6 +105,22 @@ class Settings(BaseSettings):
 
     # Directory of the built UI, served same-origin (KTD12); unset in tests and development.
     static_dir: str | None = None
+
+    # AI answers: the operator's provider list, and the master keys that encrypt workspace
+    # keys (KTD1, KTD2). Both are JSON arrays in the environment or .env; newest key first.
+    ai_providers: list[AiProvider] = Field(default_factory=list)
+    ai_key_encryption_keys: list[SecretStr] = Field(default_factory=list)
+
+    @field_validator("ai_providers")
+    @classmethod
+    def _unique_provider_ids(cls, providers: list[AiProvider]) -> list[AiProvider]:
+        ids = [p.id for p in providers]
+        if len(ids) != len(set(ids)):
+            raise ValueError("provider ids must be unique")
+        return providers
+
+    def ai_provider(self, provider_id: str) -> AiProvider | None:
+        return next((p for p in self.ai_providers if p.id == provider_id), None)
 
     @property
     def session_idle(self) -> timedelta:

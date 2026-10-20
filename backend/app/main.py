@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import RedirectResponse
 from starlette.staticfiles import StaticFiles
 
+from app.ai import keys as ai_keys
 from app.auth import GuardMiddleware
 from app.config import DEV_PEPPER, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
@@ -44,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.secret_pepper == DEV_PEPPER and not settings.insecure_dev_cookies:
         # The default is public; outside local development it would make every verifier forgeable.
         raise RuntimeError("Set LATTICE_SECRET_PEPPER to a private value.")
+    ai_keys.check_master_keys(settings)
     embedder = make_embedder(settings)
     engine = make_engine(settings.database_url)
     sessionmaker = make_sessionmaker(engine)
