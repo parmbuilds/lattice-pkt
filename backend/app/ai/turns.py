@@ -143,17 +143,7 @@ async def start(
     results = await search(db, subject, question, cap, state.embedder, settings)
     new = await search_passages(db, results)
     sent = build_prompt(memory, new, question)[1]
-    approvals = {
-        version: (name, at.isoformat())
-        for version, name, at in await db.execute(
-            select(VersionDecision.version_id, User.display_name, VersionDecision.created_at)
-            .join(User, User.id == VersionDecision.actor_id)
-            .where(
-                VersionDecision.version_id.in_({p.version_id for p in sent}),
-                VersionDecision.decision == "approved",
-            )
-        )
-    }
+    approvals = await approvals_of(db, {p.version_id for p in sent})
     try:
         api_key = keys.decrypt(settings, subject.workspace_id, entry.id, row.encrypted_key)
         provider = make_provider(entry, model.id, api_key, state.ai_client)
@@ -196,6 +186,18 @@ async def start(
         model=model,
         encrypted_key=row.encrypted_key,
     )
+
+
+async def approvals_of(db: AsyncSession, versions: set[UUID]) -> dict[UUID, tuple[str, str]]:
+    """Who approved each version and when, as Ask shows beside a passage (R11)."""
+    return {
+        version: (name, at.isoformat())
+        for version, name, at in await db.execute(
+            select(VersionDecision.version_id, User.display_name, VersionDecision.created_at)
+            .join(User, User.id == VersionDecision.actor_id)
+            .where(VersionDecision.version_id.in_(versions), VersionDecision.decision == "approved")
+        )
+    }
 
 
 def _event(name: str, data: dict) -> str:

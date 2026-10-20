@@ -129,6 +129,7 @@ async def test_reopening_after_leaving_the_group_hides_turns_and_counts_them(set
         )
         assert removed.status_code == 204
         response = await sam.get(url(ws, f"/{conversation}"))
+        approver = (await owner.get("/api/auth/me")).json()["user"]["name"]
 
     assert response.status_code == 200
     opened = response.json()
@@ -138,6 +139,9 @@ async def test_reopening_after_leaving_the_group_hides_turns_and_counts_them(set
     assert [(p["title"], p["text"]) for p in turn["passages"]] == [
         ("Checkout runbook", runbook_body)
     ]
+    # A reopened passage shows its approval, as the live answer does (R11).
+    assert turn["passages"][0]["approved_by"] == approver
+    assert turn["passages"][0]["approved_at"]
     assert "Incident" not in response.text and incident_body not in response.text
 
 

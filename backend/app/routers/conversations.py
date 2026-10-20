@@ -95,7 +95,10 @@ async def read_conversation(conversation_id: UUID, subject: Member, db: DB) -> d
             )
         ).all()
     )
-    turns = [
+    approvals = await turns.approvals_of(
+        db, {p.version_id for t in memory.turns for p in t.passages}
+    )
+    shown = [
         {
             "ordinal": t.ordinal,
             "question": t.question,
@@ -109,6 +112,8 @@ async def read_conversation(conversation_id: UUID, subject: Member, db: DB) -> d
                     "start": p.start,
                     "end": p.end,
                     "text": p.text,
+                    "approved_by": approvals.get(p.version_id, (None, None))[0],
+                    "approved_at": approvals.get(p.version_id, (None, None))[1],
                 }
                 for p in t.passages
             ],
@@ -116,7 +121,7 @@ async def read_conversation(conversation_id: UUID, subject: Member, db: DB) -> d
         for t in memory.turns
     ]
     return _view(conversation) | {
-        "turns": turns,
+        "turns": shown,
         "left_out": memory.left_out,
         "summary_dropped": memory.summary_dropped,
     }
