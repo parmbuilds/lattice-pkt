@@ -260,6 +260,12 @@ describe('AI settings page', () => {
     expect(document.querySelector('input[type="password"]')).toBeNull()
   })
 
+  it('marks the key field as a new secret, so a password manager never fills the sign-in password', async () => {
+    mockApi({ [`GET ${WS}/ai/settings`]: settings() })
+    const w = await renderPage('/w/ws1/ai', '/w/:workspaceId/ai', AiSettings, 'admin')
+    expect(w.find('input[type="password"]').attributes('autocomplete')).toBe('new-password')
+  })
+
   it('shows an admin the form and the rejected-key warning, and empties the key field after saving', async () => {
     const fetchMock = mockApi({
       [`GET ${WS}/ai/settings`]: settings({ key_status: 'rejected' }),

@@ -122,7 +122,8 @@ const disconnect = () =>
         </label>
         <label class="field">
           API key
-          <input v-model="apiKey" class="input" type="password" autocomplete="off" />
+          <!-- new-password: browsers ignore "off" here and would autofill the Lattice sign-in password, which the save sends to the provider. -->
+          <input v-model="apiKey" class="input" type="password" autocomplete="new-password" />
           <span v-if="settings.data.enabled" class="font-normal text-muted">Leave empty to keep the saved key.</span>
         </label>
         <label class="field">
