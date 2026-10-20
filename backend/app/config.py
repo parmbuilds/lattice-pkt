@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     # keys (KTD1, KTD2). Both are JSON arrays in the environment or .env; newest key first.
     ai_providers: list[AiProvider] = Field(default_factory=list)
     ai_key_encryption_keys: list[SecretStr] = Field(default_factory=list)
+    # Provider calls (KTD9): connect also bounds writes and pool waits; read bounds each chunk.
+    ai_connect_timeout_seconds: float = Field(default=5.0, gt=0)
+    ai_read_timeout_seconds: float = Field(default=30.0, gt=0)
 
     @field_validator("ai_providers")
     @classmethod
