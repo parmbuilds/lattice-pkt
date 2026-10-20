@@ -33,6 +33,7 @@ const sections = computed(() => [
             ['members', 'Members'],
             ['groups', 'Groups'],
             ['audit', 'Audit trail'],
+            ['ai', 'AI answers'],
           ],
         },
       ]

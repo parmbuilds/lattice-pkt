@@ -1,9 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Component } from 'vue'
-import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
+import { describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import ReviewCard from '../components/ReviewCard.vue'
-import { me, type Role } from '../session'
 import Approvals from './Approvals.vue'
 import Audit from './Audit.vue'
 import DocumentDetail from './DocumentDetail.vue'
@@ -13,63 +11,9 @@ import Groups from './Groups.vue'
 import Overview from './Overview.vue'
 import Search from './Search.vue'
 import Tokens from './Tokens.vue'
-
-const EVIL = '<img src=x onerror=alert(1)>'
-let mounted: VueWrapper | undefined
-
-// A route value that needs a status other than 200, or that changes per call.
-class Reply {
-  status: number
-  body: unknown
-  constructor(status: number, body: unknown) {
-    this.status = status
-    this.body = body
-  }
-}
-type Handler = (init: RequestInit) => Reply
-
-// Responses keyed by "METHOD /path" (query string ignored).
-function mockApi(routes: Record<string, unknown>) {
-  const fetchMock = vi.fn(async (path: string, init: RequestInit) => {
-    const key = `${init.method ?? 'GET'} ${path.split('?')[0]}`
-    if (!(key in routes)) return new Response(null, { status: 404 })
-    let value = routes[key]
-    if (typeof value === 'function') value = (value as Handler)(init)
-    const reply = value instanceof Reply ? value : new Reply(200, value)
-    return new Response(JSON.stringify(reply.body), { status: reply.status })
-  })
-  vi.stubGlobal('fetch', fetchMock)
-  return fetchMock
-}
+import { EVIL, field, mockApi, mounted, renderPage, Reply, track } from './testing'
 
 const DOC_DETAIL = '/w/:workspaceId/documents/:documentId'
-
-async function renderPage(
-  path: string,
-  routePath: string,
-  page: Component,
-  role: Role = 'admin',
-  extra: { path: string; component: Component }[] = [],
-) {
-  me.value = {
-    user: { id: 'u1', email: 'ada@example.com', name: 'Ada' },
-    csrf_token: 'csrf',
-    memberships: [{ workspace_id: 'ws1', workspace_name: 'Acme', role }],
-  }
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: routePath, component: page }, ...extra] })
-  await router.push(path)
-  mounted = mount(RouterView, { global: { plugins: [router] }, attachTo: document.body })
-  await flushPromises()
-  return mounted
-}
-
-const field = (w: VueWrapper, label: string) => w.findAll('label').find((l) => l.text().startsWith(label))!.find('input')
-
-afterEach(() => {
-  mounted?.unmount()
-  mounted = undefined
-  vi.unstubAllGlobals()
-})
 
 describe('Tokens page', () => {
   it('shows the secret only from the creation response, never after the list reloads', async () => {
@@ -209,13 +153,15 @@ const fileInput = (w: VueWrapper, file: File) => {
 async function mountReview(decide = vi.fn(async (action: () => Promise<unknown>) => void (await action()))) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: ReviewCard }] })
   await router.push('/')
-  mounted = mount(ReviewCard, {
-    props: { doc: draft, base: '/api/workspaces/ws1', workspaceId: 'ws1', decide },
-    global: { plugins: [router] },
-    attachTo: document.body,
-  })
+  const wrapper = track(
+    mount(ReviewCard, {
+      props: { doc: draft, base: '/api/workspaces/ws1', workspaceId: 'ws1', decide },
+      global: { plugins: [router] },
+      attachTo: document.body,
+    }),
+  )
   await flushPromises()
-  return mounted
+  return wrapper
 }
 
 describe('Documents upload', () => {

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import AiSettings from './pages/AiSettings.vue'
 import Approvals from './pages/Approvals.vue'
 import Audit from './pages/Audit.vue'
 import DocumentDetail from './pages/DocumentDetail.vue'
@@ -38,6 +39,7 @@ export const routes: RouteRecordRaw[] = [
       { path: 'members', component: Members },
       { path: 'groups', component: Groups },
       { path: 'audit', component: Audit },
+      { path: 'ai', component: AiSettings },
     ],
   },
   { path: '/:rest(.*)*', component: NotFound },
