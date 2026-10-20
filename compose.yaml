@@ -36,6 +36,10 @@ services:
       LATTICE_PUBLIC_ORIGIN: http://localhost:8000
       # Local HTTP only; remove behind TLS (KTD13).
       LATTICE_INSECURE_DEV_COOKIES: "true"
+      # Development only: a fake provider that quotes its passages, and the published development
+      # master key, which the app refuses once dev cookies are off. Override both in .env.
+      LATTICE_AI_PROVIDERS: ${LATTICE_AI_PROVIDERS:-[{"id":"fake","label":"Fake provider (development)","kind":"fake","base_url":"http://fake.invalid","auth":"bearer","models":[{"id":"fake-small","label":"Fake small","context_tokens":8000,"max_output_tokens":800}]}]}
+      LATTICE_AI_KEY_ENCRYPTION_KEYS: ${LATTICE_AI_KEY_ENCRYPTION_KEYS:-["bGF0dGljZS1kZXYtYWkta2V5LW5vdC1zZWNyZXQhISE="]}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

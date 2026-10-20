@@ -114,6 +114,53 @@ test('Ask on the Overview quotes only readable documents and lists the question 
   }
 })
 
+test('with the fake provider connected, Mei gets a streamed, cited answer and resumes the conversation', async ({ browser }) => {
+  const { page: admin, problems: adminProblems } = await newPage(browser)
+  await signIn(admin, 'arjun@lattice.demo')
+  await nav(admin, 'AI answers').click()
+  admin.on('dialog', (d) => d.accept())
+  try {
+    await admin.getByLabel('Provider').selectOption({ label: 'Fake provider (development)' })
+    await admin.getByLabel('API key').fill('e2e-dev-key')
+    await admin.getByRole('button', { name: 'Save settings' }).click()
+    await expect(status(admin)).toHaveText('AI settings saved.')
+    await expect(admin.getByLabel('API key')).toHaveValue('')
+
+    const { page, problems } = await newPage(browser)
+    await signIn(page, 'mei@lattice.demo')
+    const ask = async (question: string) => {
+      await page.getByRole('textbox', { name: 'Ask Lattice' }).fill(question)
+      await page.getByRole('button', { name: 'Ask', exact: true }).click()
+      // The composer comes back once the turn is saved.
+      await expect(page.getByRole('button', { name: 'Ask', exact: true })).toBeEnabled({ timeout: 20_000 })
+    }
+    // A run id keeps this run's conversation apart from earlier runs' in Mei's list.
+    const question = `What should I do about checkout payment timeouts? (${Date.now().toString(36)})`
+    await ask(question)
+    const answer = page.getByRole('region', { name: 'Ask Lattice' })
+    await expect(answer.getByText(/Written by Fake small from Fake provider/)).toBeVisible()
+    await expect(answer.getByRole('link', { name: 'Runbook: checkout payment timeouts' }).first()).toBeVisible()
+    await ask('And if the gateway is down? #unsupported')
+    await expect(answer.getByText(/not supported by your documents/i)).toBeVisible()
+
+    await page.reload()
+    await page.getByRole('button', { name: `Open conversation: ${question}`, exact: true }).click()
+    await expect(answer.getByText('And if the gateway is down? #unsupported')).toBeVisible()
+    await expect(answer.getByText(/by Arjun Admin/).first()).toBeVisible()
+    expect(problems).toEqual([])
+  } finally {
+    // Leave the seeded workspace quote-only for the other tests.
+    await admin.goto(admin.url())
+    await admin.getByRole('button', { name: 'Save settings' }).waitFor()
+    const off = admin.getByRole('button', { name: 'Turn off AI answers' })
+    if (await off.isVisible()) {
+      await off.click()
+      await expect(off).toHaveCount(0)
+    }
+  }
+  expect(adminProblems).toEqual([])
+})
+
 test('a document goes through draft, approval, edit, rejection, sharing and withdrawal', async ({ browser }) => {
   const run = Date.now().toString(36)
   const word = `zebracorn${run}`
