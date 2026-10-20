@@ -12,7 +12,14 @@ from app.main import create_app
 from app.models import AuditEvent
 from tests.conftest import plain_dsn
 from tests.endpoint_world import sql
-from tests.helpers import add_document, approve, create_workspace, signed_in
+from tests.helpers import (
+    add_document,
+    approve,
+    create_workspace,
+    seed_summary,
+    seed_turn,
+    signed_in,
+)
 
 # A comment is hidden from the body and kept only as an excerpt in the purgeable payload.
 SECRET = "PURGE-CANARY-SECRET"
@@ -215,3 +222,72 @@ async def test_canary_a_withdrawn_upload_leaves_no_derived_row_or_hidden_text(se
             f"%{hex_secret}%",
         )
         assert leaks == [(0,)], table
+
+
+# Conversation text is derived from the versions it cites (KTD4, R28).
+
+
+def _purge_detail(pg, doc_id) -> dict:
+    return _receipts(pg, doc_id)[-1][4]
+
+
+async def test_withdrawing_deletes_the_turns_citing_it_and_counts_them_left_out(settings, pg):
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        doc = await add_document(owner, ws, body="Check the payments latency dashboard.")
+        await approve(owner, ws, doc)
+        other = await add_document(owner, ws, title="Other", body="Restart one replica.")
+        await approve(owner, ws, other)
+        conversation, turn = seed_turn(
+            pg, ws, owner.user_id, [(doc["id"], doc["pending_version_id"])]
+        )
+        kept_conversation, kept = seed_turn(
+            pg, ws, owner.user_id, [(other["id"], other["pending_version_id"])]
+        )
+        assert (await owner.post(_docs(ws, doc["id"], "/withdraw"))).status_code == 204
+    assert sql(pg, "SELECT id FROM turns WHERE id = %s", turn) == []
+    assert sql(pg, "SELECT count(*) FROM turns WHERE id = %s", kept) == [(1,)]
+    left_out = "SELECT left_out FROM conversations WHERE id = %s"
+    assert sql(pg, left_out, conversation) == [(1,)]
+    assert sql(pg, left_out, kept_conversation) == [(0,)]
+    removed = _purge_detail(pg, doc["id"])["removed"]
+    assert removed["turns"] == 1 and "conversation_summaries" not in removed
+
+
+async def test_approving_a_new_version_deletes_turns_and_summaries_citing_the_old_one(settings, pg):
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        doc = await add_document(owner, ws, body="Confirm the health check is failing.")
+        await approve(owner, ws, doc)
+        v1 = doc["pending_version_id"]
+        conversation, turn = seed_turn(pg, ws, owner.user_id, [(doc["id"], v1)])
+        summary = seed_summary(pg, ws, conversation, [(doc["id"], v1)])
+        edited = await owner.put(
+            _docs(ws, doc["id"]), json={"title": "Runbook", "body": "Notify finance as well."}
+        )
+        await approve(owner, ws, edited.json())
+    assert sql(pg, "SELECT id FROM turns WHERE id = %s", turn) == []
+    assert sql(pg, "SELECT id FROM conversation_summaries WHERE id = %s", summary) == []
+    assert sql(
+        pg, "SELECT left_out, summary_dropped FROM conversations WHERE id = %s", conversation
+    ) == [(1, True)]
+    removed = _purge_detail(pg, doc["id"])["removed"]
+    assert (removed["turns"], removed["conversation_summaries"]) == (1, 1)
+
+
+async def test_a_turn_citing_one_purged_and_one_serving_version_is_deleted_whole(settings, pg):
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        gone = await add_document(owner, ws, title="Gone", body="Flush the legacy cache.")
+        await approve(owner, ws, gone)
+        stays = await add_document(owner, ws, title="Stays", body="Watch authorisation rates.")
+        await approve(owner, ws, stays)
+        _, turn = seed_turn(
+            pg,
+            ws,
+            owner.user_id,
+            [(gone["id"], gone["pending_version_id"]), (stays["id"], stays["pending_version_id"])],
+        )
+        assert (await owner.post(_docs(ws, gone["id"], "/withdraw"))).status_code == 204
+    assert sql(pg, "SELECT id FROM turns WHERE id = %s", turn) == []
+    assert sql(pg, "SELECT count(*) FROM turn_passages WHERE turn_id = %s", turn) == [(0,)]

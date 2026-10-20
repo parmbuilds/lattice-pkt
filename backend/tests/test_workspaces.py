@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 
 from tests.conftest import plain_dsn
-from tests.helpers import create_workspace, invite, join, signed_in
+from tests.helpers import create_workspace, invite, join, seed_turn, signed_in
 
 
 def _sql(pg, query, *params):
@@ -212,6 +212,19 @@ async def test_removing_a_member_deletes_group_memberships_and_revokes_tokens(se
         assert revoked[0][0] is not None
         memberships = (await member.get("/api/auth/me")).json()["memberships"]
         assert memberships == []
+
+
+async def test_removing_a_member_deletes_their_conversations_and_no_one_elses(settings, pg):
+    async with signed_in(settings) as owner, signed_in(settings) as member:
+        ws = await create_workspace(owner)
+        await join(owner, ws, member)
+        theirs, _ = seed_turn(pg, ws, member.user_id, [])
+        mine, _ = seed_turn(pg, ws, owner.user_id, [])
+        assert (
+            await owner.delete(f"/api/workspaces/{ws}/members/{member.user_id}")
+        ).status_code == 204
+    assert _sql(pg, "SELECT id FROM conversations WHERE id = %s", theirs) == []
+    assert len(_sql(pg, "SELECT id FROM conversations WHERE id = %s", mine)) == 1
 
 
 async def test_admins_remove_members_but_only_the_owner_removes_admins(settings):

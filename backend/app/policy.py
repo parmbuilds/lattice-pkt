@@ -75,6 +75,10 @@ class Action(StrEnum):
     LIST_DOCUMENTS = "list_documents"
     SEARCH = "search"
     VIEW_OWN_SEARCHES = "view_own_searches"
+    ASK = "ask"
+    MANAGE_OWN_CONVERSATIONS = "manage_own_conversations"
+    VIEW_AI_SETTINGS = "view_ai_settings"
+    MANAGE_AI_SETTINGS = "manage_ai_settings"
     MANAGE_ENTITIES = "manage_entities"
     READ_GRAPH = "read_graph"
 
@@ -256,6 +260,12 @@ def _rule_for(
         return "tokens.own"  # R22
     if action is Action.VIEW_OWN_SEARCHES:
         return "searches.own"  # a person's own searches and their agents', never anyone else's
+    if action is Action.ASK:
+        return "ask.member"  # answers draw only on passages the asker's own search returns (R7)
+    if action is Action.MANAGE_OWN_CONVERSATIONS:
+        return "conversations.own"  # each query is scoped to the asker's own rows (R19)
+    if action is Action.VIEW_AI_SETTINGS:
+        return "ai_settings.member"  # members see provider and model, never the key (R30)
     if action is Action.CREATE_WORKSPACE:
         return "workspace.create" if owner else None  # R4: the creator is the owner
     if action is Action.ACCEPT_INVITE:
@@ -266,6 +276,7 @@ def _rule_for(
         Action.VIEW_AUDIT,
         Action.REVOKE_INVITE,
         Action.MANAGE_ENTITIES,  # R21
+        Action.MANAGE_AI_SETTINGS,  # provider, key and retention (R2, R20)
     ):
         return f"{action}.manager" if manager else None  # R10, R30
 

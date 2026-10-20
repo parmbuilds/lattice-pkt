@@ -1,6 +1,7 @@
 """Chunk and embed pending and serving versions, one core for inline and worker use (KTD3).
 
-Lock order everywhere: documents -> derivations -> chunks -> intake_payloads.
+Lock order everywhere: documents -> derivations -> chunks -> intake_payloads, and
+documents -> conversations -> turns (KTD10).
 """
 
 import asyncio
