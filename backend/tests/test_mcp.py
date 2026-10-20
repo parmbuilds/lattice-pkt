@@ -324,3 +324,30 @@ async def test_get_evidence_returns_exactly_the_requested_span(settings, server)
     assert "attempted_overrides" not in with_span["detail"]
     assert with_unknown["detail"]["returned_spans"] == [[serving, 0, 7]]
     assert with_unknown["detail"]["attempted_overrides"] == {"page": 2}
+
+
+async def test_search_history_lists_your_own_searches_and_your_agents_newest_first(
+    settings, server
+):
+    async with signed_in(settings) as owner, signed_in(settings) as reader:
+        ws = await create_workspace(owner)
+        await join(owner, ws, reader)
+        doc = await add_document(owner, ws, title="Checkout runbook", body="checkout timeouts")
+        await approve(owner, ws, doc)
+        search = f"/api/workspaces/{ws}/search"
+        found = (await owner.get(search, params={"q": "checkout"})).json()["results"]
+        await owner.get(search, params={"q": "timeouts", "via": "ask"})
+        await _agent_search(server, await _token(owner, ws), "checkout agent")
+        await reader.get(search, params={"q": "only the reader asked this"})
+
+        history = (await owner.get(f"{search}/history")).json()["searches"]
+        assert [(s["source"], s["query"], s["token_name"]) for s in history] == [
+            ("agent", "checkout agent", "agent"),
+            ("ask", "timeouts", None),
+            ("search", "checkout", None),
+        ]
+        assert history[2]["count"] == len(found)
+        for i in range(10):
+            await owner.get(search, params={"q": f"query {i}"})
+        latest = (await owner.get(f"{search}/history")).json()["searches"]
+        assert [s["query"] for s in latest] == [f"query {i}" for i in range(9, -1, -1)]

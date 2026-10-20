@@ -32,6 +32,21 @@ export async function signOut() {
   await refresh()
 }
 
+const LAST_WORKSPACE = 'lattice.lastWorkspace'
+
+export function rememberWorkspace(workspaceId: string) {
+  localStorage.setItem(LAST_WORKSPACE, workspaceId)
+}
+
+// Where sign-in lands: the last workspace opened in this browser if still a member, else the first; the
+// stored id is only a hint, checked against the fresh memberships, so it never opens someone else's workspace.
+export function homePath(): string {
+  const memberships = me.value?.memberships ?? []
+  const last = localStorage.getItem(LAST_WORKSPACE)
+  const home = memberships.find((m) => m.workspace_id === last) ?? memberships[0]
+  return home ? `/w/${home.workspace_id}/overview` : '/'
+}
+
 // The role comes from /api/auth/me, re-fetched on every navigation, so a demotion shows at once.
 export function useWorkspace() {
   const route = useRoute()

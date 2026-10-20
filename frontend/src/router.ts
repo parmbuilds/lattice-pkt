@@ -8,6 +8,7 @@ import Groups from './pages/Groups.vue'
 import Invite from './pages/Invite.vue'
 import Members from './pages/Members.vue'
 import NotFound from './pages/NotFound.vue'
+import Overview from './pages/Overview.vue'
 import Search from './pages/Search.vue'
 import SignIn from './pages/SignIn.vue'
 import Tokens from './pages/Tokens.vue'
@@ -25,7 +26,8 @@ export const routes: RouteRecordRaw[] = [
     component: WorkspaceLayout,
     meta: { auth: true },
     children: [
-      { path: '', redirect: (to) => `/w/${String(to.params.workspaceId)}/documents` },
+      { path: '', redirect: (to) => `/w/${String(to.params.workspaceId)}/overview` },
+      { path: 'overview', component: Overview },
       { path: 'documents', component: Documents },
       { path: 'documents/:documentId', component: DocumentDetail },
       { path: 'search', component: Search },

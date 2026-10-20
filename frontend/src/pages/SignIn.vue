@@ -3,10 +3,11 @@ import { useRouter } from 'vue-router'
 import AuthFrame from '../components/AuthFrame.vue'
 import SignInForm from '../components/SignInForm.vue'
 import SignUpForm from '../components/SignUpForm.vue'
+import { homePath } from '../session'
 
 defineProps<{ mode: 'signin' | 'signup' }>()
 const router = useRouter()
-const done = () => router.push('/')
+const done = () => router.push(homePath())
 </script>
 
 <template>

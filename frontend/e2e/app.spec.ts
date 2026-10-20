@@ -21,7 +21,8 @@ async function signIn(page: Page, email: string, password = PASSWORD) {
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page).toHaveURL(/\/$/)
+  // Seeded people are in one workspace, so sign-in opens its Overview directly.
+  await expect(page).toHaveURL(/\/w\/[^/]+\/overview$/)
 }
 
 async function newPage(browser: Browser) {
@@ -37,7 +38,7 @@ test('an alias host redirects to the public origin, where sign-in works', async 
   await page.goto(baseURL!.replace('localhost', '127.0.0.1') + '/signin')
   await expect(page).toHaveURL(`${baseURL}/signin`)
   await signIn(page, 'olivia@lattice.demo')
-  await expect(page.getByRole('link', { name: 'Acme Engineering' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
 })
 
 for (const [who, manager] of [
@@ -49,11 +50,10 @@ for (const [who, manager] of [
   test(`every page renders for ${who} without console or CSP errors`, async ({ page }) => {
     const problems = watch(page)
     await signIn(page, `${who}@lattice.demo`)
-    await page.getByRole('link', { name: 'Acme Engineering' }).click()
-    await expect(page.getByRole('heading', { name: 'Documents' })).toBeVisible()
-    await expect(page.getByRole('table')).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
+    await expect(page.getByLabel('Documents you can read')).toBeVisible()
 
-    const pages = ['Documents', 'Search', 'Entities', 'Tokens', ...(manager ? ['Approvals', 'Members', 'Groups', 'Audit trail'] : [])]
+    const pages = ['Overview', 'Documents', 'Search', 'Entities', 'Tokens', ...(manager ? ['Approvals', 'Members', 'Groups', 'Audit trail'] : [])]
     for (const name of pages) {
       await nav(page, name).click()
       await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
@@ -79,7 +79,6 @@ test('the same search returns different documents for Mei and Sam', async ({ bro
   for (const who of ['mei', 'sam']) {
     const { page } = await newPage(browser)
     await signIn(page, `${who}@lattice.demo`)
-    await page.getByRole('link', { name: 'Acme Engineering' }).click()
     await nav(page, 'Search').click()
     await page.getByLabel('Search approved documents').fill('checkout')
     await page.getByRole('button', { name: 'Search' }).click()
@@ -91,6 +90,28 @@ test('the same search returns different documents for Mei and Sam', async ({ bro
   expect(results.sam).not.toContain('Runbook: checkout payment timeouts')
   expect(results.sam).toContain('Incident 2026-09-14: checkout outage')
   expect(results.mei).not.toContain('Incident 2026-09-14: checkout outage')
+})
+
+test('Ask on the Overview quotes only readable documents and lists the question in your history', async ({ browser }) => {
+  // The same question as the Search test, so the two people's readable sets are known.
+  const question = 'checkout'
+  for (const [who, sees, never] of [
+    ['mei', 'Runbook: checkout payment timeouts', 'Incident 2026-09-14: checkout outage'],
+    ['sam', 'Incident 2026-09-14: checkout outage', 'Runbook: checkout payment timeouts'],
+  ]) {
+    const { page, problems } = await newPage(browser)
+    await signIn(page, `${who}@lattice.demo`)
+    await page.getByRole('textbox', { name: 'Ask Lattice' }).fill(question)
+    await page.getByRole('button', { name: 'Ask', exact: true }).click()
+    const answer = page.getByRole('region', { name: 'Ask Lattice' })
+    await expect(answer.getByText(/Found in \d+ approved documents? you can read/)).toBeVisible()
+    await expect(answer.getByRole('article').getByRole('link', { name: sees })).toBeVisible()
+    await expect(answer.getByRole('link', { name: never })).toHaveCount(0)
+    const asked = page.getByRole('button', { name: `Ask again: ${question}` }).first()
+    await expect(asked).toBeVisible()
+    await expect(asked.getByText('Ask', { exact: true })).toBeVisible()
+    expect(problems).toEqual([])
+  }
 })
 
 test('a document goes through draft, approval, edit, rejection, sharing and withdrawal', async ({ browser }) => {

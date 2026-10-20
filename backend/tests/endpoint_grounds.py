@@ -532,6 +532,18 @@ def g_search(ctx: Ctx) -> None:
     ground_search_results(ctx.pg, ctx.body["results"])
 
 
+def g_search_history(ctx: Ctx) -> None:
+    unchanged(ctx)
+    rows = sql(
+        ctx.pg,
+        "SELECT detail->>'query' FROM audit_events WHERE workspace_id = %s AND actor_user_id = %s "
+        "AND action = 'search' AND outcome = 'allow' ORDER BY id DESC LIMIT 10",
+        ctx.world.ws,
+        ctx.id(ctx.actor),
+    )
+    assert [s["query"] for s in ctx.body["searches"]] == [query for (query,) in rows]
+
+
 def g_audit(ctx: Ctx) -> None:
     unchanged(ctx)
     rows = sql(
