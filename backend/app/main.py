@@ -79,7 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # A mounted sub-app's lifespan does not run, so the host runs the MCP session manager.
         tasks = [
             asyncio.create_task(run_worker(sessionmaker, app.state.embedder, settings)),
-            asyncio.create_task(retention.run_sweep(sessionmaker)),
+            asyncio.create_task(retention.run_sweep(sessionmaker, settings)),
         ]
         try:
             async with mcp.session_manager.run():

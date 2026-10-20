@@ -6,11 +6,14 @@ import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.ai import turns
+from app.auth import load_subject
+from app.config import Settings
 from app.models import Conversation
-from app.policy import Subject
+from app.policy import Action, Subject, decide
 from app.services import ai_settings
 
 log = logging.getLogger("lattice.retention")
@@ -35,8 +38,31 @@ async def own_unexpired(db: AsyncSession, subject: Subject) -> tuple:
     )
 
 
-async def sweep(sessionmaker: async_sessionmaker) -> int:
-    """Delete every workspace's expired conversations, one transaction per workspace."""
+async def abandon_stale(sessionmaker: async_sessionmaker, settings: Settings) -> None:
+    """Record turns whose mark outlived the turn timeout as abandoned and clear their marks
+    (KTD5 step 5); a conversation a turn still has locked waits for the next sweep."""
+    async with sessionmaker.begin() as db:
+        stale = await db.execute(
+            select(
+                Conversation.id,
+                Conversation.workspace_id,
+                Conversation.user_id,
+                Conversation.in_flight_turn,
+            )
+            .where(Conversation.in_flight_at < func.now() - turns.turn_timeout(settings))
+            .order_by(Conversation.id)
+            .with_for_update(skip_locked=True)
+        )
+        for conversation_id, workspace_id, user_id, number in stale.all():
+            subject = await load_subject(db, user_id, workspace_id)
+            decision = decide(subject, Action.ASK)
+            await turns.finish(db, subject, decision, conversation_id, number, "abandoned")
+
+
+async def sweep(sessionmaker: async_sessionmaker, settings: Settings) -> int:
+    """Delete every workspace's expired conversations, one transaction per workspace, after
+    abandoning stale turns."""
+    await abandon_stale(sessionmaker, settings)
     async with sessionmaker() as db:
         workspaces = (await db.scalars(select(Conversation.workspace_id).distinct())).all()
     deleted = 0
@@ -47,11 +73,11 @@ async def sweep(sessionmaker: async_sessionmaker) -> int:
     return deleted
 
 
-async def run_sweep(sessionmaker: async_sessionmaker) -> None:
+async def run_sweep(sessionmaker: async_sessionmaker, settings: Settings) -> None:
     """The retention loop the app lifespan runs beside the derivation worker."""
     while True:
         try:
-            await sweep(sessionmaker)
+            await sweep(sessionmaker, settings)
         except Exception:
             log.exception("retention sweep failed")
         await asyncio.sleep(SWEEP_SECONDS)

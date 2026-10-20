@@ -18,6 +18,7 @@ from app.config import DEV_AI_KEY
 from app.main import create_app
 from tests.endpoint_grounds import (
     AI_PROVIDER,
+    ASKED,
     EVERY_MEMBER,
     MANAGERS,
     MATRIX_KEY,
@@ -27,6 +28,7 @@ from tests.endpoint_grounds import (
     conversation_of,
     g_add_to_group,
     g_ai_settings,
+    g_ask,
     g_audit,
     g_connect_ai,
     g_conversation,
@@ -70,7 +72,9 @@ from tests.endpoint_grounds import (
     g_version,
     g_withdraw,
     seed_ai,
+    seed_ask,
     seed_conversations,
+    sse,
     unchanged,
 )
 from tests.endpoint_world import (
@@ -99,6 +103,7 @@ class Case:
     audited_when_allowed: Callable[[str], bool] = lambda actor: True
     multipart: bool = False  # the request body is httpx `files`, not JSON
     prepare: Callable[[World, dict], None] = lambda world, pg: None  # extra rows, before the call
+    audit_count: int = 1  # rows an allowed call writes; an Ask turn writes two (R23)
 
 
 # --- The matrix -----------------------------------------------------------------------------
@@ -609,6 +614,19 @@ CASES = [
         g_delete_conversation,
         prepare=seed_conversations,
     ),
+    # Each member asks in their own conversation; outsiders and anonymous callers try the author's.
+    Case(
+        "ask in own conversation",
+        "POST",
+        W + "/conversations/{conversation_id}/turns",
+        lambda w, a: (w.url(f"/conversations/{conversation_of(w, a)}/turns"), {"question": ASKED}),
+        EVERY_MEMBER,
+        200,
+        "ask",
+        g_ask,
+        prepare=seed_ask,
+        audit_count=2,
+    ),
 ]
 
 
@@ -634,7 +652,10 @@ async def test_endpoint(case: Case, actor: str, settings, pg, app):
         allowed = actor in case.allowed
         expected = case.status if allowed else 401 if actor == "anon" else 404
         assert response.status_code == expected, response.text
-        payload = response.json() if response.content else {}
+        if response.headers.get("content-type", "").startswith("text/event-stream"):
+            payload = {"events": sse(response.text)}
+        else:
+            payload = response.json() if response.content else {}
         if allowed:
             case.ground(Ctx(world, actor, payload, changes, audit, pg))
         else:  # a refusal looks like absence and changes nothing (R29)
@@ -643,14 +664,16 @@ async def test_endpoint(case: Case, actor: str, settings, pg, app):
 
         if actor in MEMBERS and (allowed and case.audited_when_allowed(actor) or not allowed):
             # Purge receipts are the system's own rows; grounds check them (KTD8).
-            ((row,),) = [[r for r in audit if r["channel"] != "system"]]
-            assert (str(row["actor_user_id"]), row["action"], row["channel"]) == (
-                world.users[actor],
-                case.action,
-                "ui",
-            )
-            assert row["outcome"] == ("allow" if allowed else "deny"), row
-            assert row["rule_id"], row  # every decision names the rule that made it (R27)
+            rows = [r for r in audit if r["channel"] != "system"]
+            assert len(rows) == (case.audit_count if allowed else 1), rows
+            for row in rows:
+                assert (str(row["actor_user_id"]), row["action"], row["channel"]) == (
+                    world.users[actor],
+                    case.action,
+                    "ui",
+                )
+                assert row["outcome"] == ("allow" if allowed else "deny"), row
+                assert row["rule_id"], row  # every decision names the rule that made it (R27)
         else:  # outsiders and anonymous callers never write into the workspace trail
             assert audit == [], audit
 

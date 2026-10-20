@@ -156,7 +156,7 @@ async def test_an_expired_conversation_reads_as_absent_and_the_sweep_deletes_it(
         assert [c["id"] for c in listed] == [fresh]
         assert _exists(pg, expired)
 
-        await retention.sweep(sessions)
+        await retention.sweep(sessions, settings)
         assert not _exists(pg, expired) and _exists(pg, fresh)
 
 

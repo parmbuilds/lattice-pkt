@@ -5,13 +5,17 @@ world in tests/endpoint_world.py, not derived from app.policy, so it stays an in
 """
 
 import hmac
+import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
-from app.config import AiModel, AiProvider
+from pydantic import SecretStr
+
+from app.ai import keys
+from app.config import DEV_AI_KEY, AiModel, AiProvider, Settings
 from tests.endpoint_world import MEMBERS, Changes, World, sql
 
 MANAGERS = {"owner", "admin"}
@@ -809,3 +813,65 @@ def g_delete_conversation(ctx: Ctx) -> None:
     assert [r["id"] for r in ctx.changes.removed["conversations"]] == [own]
     assert ctx.changes.added["conversations"] == []
     assert sql(ctx.pg, "SELECT count(*) FROM turns WHERE conversation_id = %s", own) == [(0,)]
+
+
+# --- Ask turns ------------------------------------------------------------------------------
+
+ASKED = "How do I restart checkout?"
+
+
+def sse(text: str) -> list[tuple[str, dict]]:
+    """A turn's server-sent events as (name, data) pairs."""
+    blocks = [block.split("\n") for block in text.split("\n\n") if block]
+    return [(n.removeprefix("event: "), json.loads(d.removeprefix("data: "))) for n, d in blocks]
+
+
+def seed_ask(world: World, pg: dict) -> None:
+    """Connect the fake provider with a key sealed as a save would (a turn decrypts it), and give
+    each member a conversation."""
+    sealing = Settings.model_construct(ai_key_encryption_keys=[SecretStr(DEV_AI_KEY)])
+    sealed = keys.encrypt(sealing, uuid.UUID(world.ws), "fake", MATRIX_KEY)
+    sql(
+        pg,
+        "INSERT INTO ai_settings (workspace_id, provider_id, model, encrypted_key)"
+        " VALUES (%s, 'fake', 'fake-1', %s) RETURNING workspace_id",
+        world.ws,
+        sealed,
+    )
+    seed_conversations(world, pg)
+
+
+def g_ask(ctx: Ctx) -> None:
+    only(ctx.changes, "conversations")
+    own = conversation_of(ctx.world, ctx.actor)
+    old, new = updated_one(ctx, "conversations")
+    assert old["id"] == own and (new["in_flight_turn"], new["in_flight_at"]) == (2, None)
+    assert new["last_turn_at"] > old["last_turn_at"]
+
+    names = [name for name, _ in ctx.body["events"]]
+    assert (names[0], set(names[1:-1]), names[-1]) == ("passages", {"sentence"}, "done")
+    passages = ctx.body["events"][0][1]["passages"]
+    versions = sorted({p["version_id"] for p in passages})
+    assert set(versions) <= set(retrievable(ctx.world, ctx.actor))
+    saved = sql(
+        ctx.pg,
+        "SELECT p.ordinal, p.version_id::text FROM turns t JOIN turn_passages p "
+        "ON p.turn_id = t.id WHERE t.conversation_id = %s AND t.ordinal = 2 ORDER BY p.ordinal",
+        own,
+    )
+    assert saved == [(int(p["id"][1:]), p["version_id"]) for p in passages]
+
+    # Both rows ground the turn: what was sent and to whom, then the outcome, never the answer.
+    sent, outcome = ctx.audit
+    assert sorted(str(v) for v in sent["returned_version_ids"]) == versions
+    assert sent["detail"] | {"count": 0} == {
+        "conversation_id": own,
+        "turn": 2,
+        "query": ASKED,
+        "count": 0,
+        "provider_id": "fake",
+        "model": "fake-1",
+    }
+    assert outcome["detail"] == {"conversation_id": own, "turn": 2, "outcome": "answered"}
+    answer = [data["text"] for name, data in ctx.body["events"] if name == "sentence"]
+    assert not any(text in repr(ctx.audit) for text in answer) and MATRIX_KEY not in repr(ctx.audit)

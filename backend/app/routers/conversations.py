@@ -1,17 +1,19 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai import retention
+from app.ai import retention, turns
 from app.ai.answering import guard
 from app.audit import authorize, not_found
 from app.auth import Member
 from app.db import DB
 from app.models import Conversation, Turn
 from app.policy import Action, Subject
+from app.services.search import MAX_QUERY
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/conversations", tags=["conversations"])
 
@@ -20,6 +22,10 @@ TITLE_MAX = 200
 
 class NewConversation(BaseModel):
     title: str
+
+
+class Question(BaseModel):
+    question: str
 
 
 async def own_conversation(
@@ -132,3 +138,19 @@ async def delete_conversation(conversation_id: UUID, subject: Member, db: DB) ->
     )
     if result.rowcount == 0:
         raise not_found()
+
+
+@router.post("/{conversation_id}/turns")
+async def ask(
+    conversation_id: UUID, body: Question, subject: Member, request: Request, db: DB
+) -> StreamingResponse:
+    """One Ask turn, streamed as server-sent events (KTD5, KTD7)."""
+    decision = await authorize(db, subject, Action.ASK, defer_allowed=True)
+    question = body.question.strip()
+    if not 1 <= len(question) <= MAX_QUERY:
+        raise HTTPException(400, f"Questions need 1-{MAX_QUERY} characters.")
+    await own_conversation(db, subject, conversation_id)
+    state = request.app.state
+    started = await turns.start(db, subject, decision, conversation_id, question, state)
+    # The request transaction commits as this returns, before the stream starts (KTD5 step 1).
+    return StreamingResponse(turns.run(state.sessionmaker, started), media_type="text/event-stream")
