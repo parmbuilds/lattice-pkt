@@ -193,6 +193,35 @@ describe('Overview with AI answers on', () => {
   })
 })
 
+describe('Overview before the AI settings load', () => {
+  it('holds Ask until it knows whether answers are on, so a question never takes the wrong path', async () => {
+    const fetchMock = mockApi({
+      [`GET ${WS}/documents`]: { documents: [] },
+      [`GET ${WS}/search/history`]: { searches: [] },
+      [`GET ${WS}/ai/settings`]: settings({ enabled: false, provider_id: null, model: null }),
+      [`GET ${WS}/conversations`]: { conversations: [] },
+      [`GET ${WS}/search`]: { results: [] },
+    })
+    let release = () => {}
+    const held = new Promise<void>((r) => (release = r))
+    vi.stubGlobal('fetch', (p: string, i: RequestInit) =>
+      p.endsWith('/ai/settings') ? held.then(() => fetchMock(p, i)) : fetchMock(p, i),
+    )
+    const w = await renderPage('/w/ws1/overview', '/w/:workspaceId/overview', Overview, 'member')
+    await w.find('#ask-input').setValue('latency')
+    expect(w.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(fetchMock.mock.calls.some(([p]) => String(p).startsWith(`${WS}/search?`))).toBe(false)
+
+    release()
+    await flushPromises()
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(fetchMock.mock.calls.some(([p]) => String(p).startsWith(`${WS}/search?`))).toBe(true)
+  })
+})
+
 describe('Overview with AI answers off', () => {
   it('asks through search and keeps the quote-only footer', async () => {
     const fetchMock = mockApi({

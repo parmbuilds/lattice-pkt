@@ -140,7 +140,8 @@ const remove = (c: Conversation) =>
   })
 
 async function ask(q = question.value.trim()) {
-  if (!q || asking.value) return
+  // Until the settings load, which path a question takes is unknown.
+  if (!q || asking.value || ai.loading) return
   if (aiOn.value) return answer(q)
   close()
   asking.value = true
@@ -280,7 +281,7 @@ function onEnter(e: KeyboardEvent) {
           <p v-else class="text-sm text-graphite">Answers quote approved documents. Nothing is generated.</p>
           <div class="flex gap-2">
             <button v-if="answering" type="button" class="btn min-h-10" @click="answering.abort()">Stop</button>
-            <button type="submit" class="btn btn-primary min-h-10 px-6" :disabled="asking">{{ answering ? 'Answering…' : 'Ask' }}</button>
+            <button type="submit" class="btn btn-primary min-h-10 px-6" :disabled="asking || ai.loading">{{ answering ? 'Answering…' : 'Ask' }}</button>
           </div>
         </div>
       </form>
