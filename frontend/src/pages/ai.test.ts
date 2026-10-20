@@ -126,6 +126,13 @@ describe('Overview with AI answers on', () => {
     expect((w.find('#ask-input').element as HTMLTextAreaElement).disabled).toBe(false)
   })
 
+  it('leaving the page mid-answer aborts the request, as Stop does', async () => {
+    const { w, stream } = await askWithAi()
+    await stream.send('passages', { passages: [], left_out: 0, summary_dropped: false })
+    w.unmount()
+    expect(stream.signal.aborted).toBe(true)
+  })
+
   it('reopens a conversation from an Ask history row and says only how many turns were left out', async () => {
     mockApi({
       [`GET ${WS}/documents`]: { documents: [] },

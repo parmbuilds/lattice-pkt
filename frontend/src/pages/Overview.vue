@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { api, errorText, postStream } from '../api'
 import AiAnswer, { type AiPassage, type AiSentence, type AiTurn } from '../components/AiAnswer.vue'
 import LoadState from '../components/LoadState.vue'
@@ -81,6 +81,9 @@ function guardNotices(leftOut: number, summaryDropped: boolean) {
   if (summaryDropped) notices.push('Earlier context was dropped because a document it drew on is no longer available to you')
   return notices
 }
+
+// Leaving the page ends the answer as Stop does, so no turn keeps running unseen (KTD5).
+onBeforeUnmount(() => answering.value?.abort())
 
 async function answer(q: string) {
   asking.value = true
