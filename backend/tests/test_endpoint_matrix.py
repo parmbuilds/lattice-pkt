@@ -12,20 +12,27 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import pytest
+from pydantic import SecretStr
 
+from app.config import DEV_AI_KEY
 from app.main import create_app
 from tests.endpoint_grounds import (
+    AI_PROVIDER,
     EVERY_MEMBER,
     MANAGERS,
+    MATRIX_KEY,
     NOT_FOUND,
     UPLOADED,
     Ctx,
     g_add_to_group,
+    g_ai_settings,
     g_audit,
+    g_connect_ai,
     g_create_document,
     g_decision,
     g_delete_entity,
     g_delete_group,
+    g_disconnect_ai,
     g_edit,
     g_entities,
     g_entity,
@@ -57,6 +64,7 @@ from tests.endpoint_grounds import (
     g_upload_version,
     g_version,
     g_withdraw,
+    seed_ai,
     unchanged,
 )
 from tests.endpoint_world import (
@@ -84,6 +92,7 @@ class Case:
     ground: Callable[[Ctx], None]
     audited_when_allowed: Callable[[str], bool] = lambda actor: True
     multipart: bool = False  # the request body is httpx `files`, not JSON
+    prepare: Callable[[World, dict], None] = lambda world, pg: None  # extra rows, before the call
 
 
 # --- The matrix -----------------------------------------------------------------------------
@@ -515,18 +524,56 @@ CASES = [
         "manage_own_tokens",
         g_revoke_token,
     ),
+    Case(
+        "view AI settings",
+        "GET",
+        W + "/ai/settings",
+        lambda w, a: (w.url("/ai/settings"), None),
+        EVERY_MEMBER,
+        200,
+        "view_ai_settings",
+        g_ai_settings,
+        prepare=seed_ai,
+    ),
+    Case(
+        "connect AI",
+        "PUT",
+        W + "/ai/settings",
+        lambda w, a: (
+            w.url("/ai/settings"),
+            {"provider_id": "fake", "model": "fake-1", "retention_days": 30, "api_key": MATRIX_KEY},
+        ),
+        MANAGERS,
+        200,
+        "manage_ai_settings",
+        g_connect_ai,
+    ),
+    Case(
+        "disconnect AI",
+        "DELETE",
+        W + "/ai/settings",
+        lambda w, a: (w.url("/ai/settings"), None),
+        MANAGERS,
+        204,
+        "manage_ai_settings",
+        g_disconnect_ai,
+        prepare=seed_ai,
+    ),
 ]
 
 
 @pytest.fixture(scope="module")
 def app(settings):
-    return create_app(settings)
+    # The fake provider answers the key check without a network call.
+    keys = {"ai_providers": [AI_PROVIDER], "ai_key_encryption_keys": [SecretStr(DEV_AI_KEY)]}
+    return create_app(settings.model_copy(update=keys))
 
 
 @pytest.mark.parametrize("actor", ACTORS)
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name.replace(" ", "-"))
 async def test_endpoint(case: Case, actor: str, settings, pg, app):
     async with build_world(settings, pg, app) as world:
+        case.prepare(world, pg)
         path, body = case.request(world, actor)
         before, audit_from = snapshot(pg, world), last_audit_id(pg)
         sent = {"files": body} if case.multipart else {"json": body}

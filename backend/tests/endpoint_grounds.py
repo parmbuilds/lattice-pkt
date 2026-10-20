@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
+from app.config import AiModel, AiProvider
 from tests.endpoint_world import MEMBERS, Changes, World, sql
 
 MANAGERS = {"owner", "admin"}
@@ -638,3 +639,73 @@ def g_delete_entity(ctx: Ctx) -> None:
     only(ctx.changes, "entities", "entity_aliases")
     assert [r["id"] for r in ctx.changes.removed["entities"]] == [ctx.world.entity]
     assert [r["alias"] for r in ctx.changes.removed["entity_aliases"]] == ["payments"]
+
+
+# --- AI settings ----------------------------------------------------------------------------
+
+AI_PROVIDER = AiProvider(
+    id="fake",
+    label="Fake",
+    kind="fake",
+    models=[AiModel(id="fake-1", label="Fake 1", context_tokens=8000, max_output_tokens=500)],
+)
+MATRIX_KEY = "sk-matrix-SECRET-key"
+_PROVIDERS = [{"id": "fake", "label": "Fake", "models": [{"id": "fake-1", "label": "Fake 1"}]}]
+
+
+def seed_ai(world: World, pg: dict) -> None:
+    """Connect the world's workspace (a stand-in ciphertext: these calls never decrypt it)."""
+    sql(
+        pg,
+        "INSERT INTO ai_settings (workspace_id, provider_id, model, encrypted_key, retention_days)"
+        " VALUES (%s, 'fake', 'fake-1', 'sealed', 45) RETURNING workspace_id",
+        world.ws,
+    )
+
+
+def _ai_view(ctx: Ctx, enabled: bool, retention: int) -> dict:
+    view = {
+        "providers": _PROVIDERS,
+        "enabled": enabled,
+        "provider_id": "fake" if enabled else None,
+        "model": "fake-1" if enabled else None,
+        "retention_days": retention,
+    }
+    return view | ({"key_status": "ok"} if ctx.actor in MANAGERS else {})
+
+
+def g_ai_settings(ctx: Ctx) -> None:
+    unchanged(ctx)
+    assert ctx.body == _ai_view(ctx, True, 45)  # members never see the key status (R30)
+
+
+def g_connect_ai(ctx: Ctx) -> None:
+    only(ctx.changes, "ai_settings")
+    (row,) = ctx.changes.added["ai_settings"]
+    assert (row["provider_id"], row["model"], row["key_status"], row["retention_days"]) == (
+        "fake",
+        "fake-1",
+        "ok",
+        30,
+    )
+    assert MATRIX_KEY.encode().hex() not in row["encrypted_key"]  # stored encrypted (R4)
+    assert ctx.body == _ai_view(ctx, True, 30)
+    assert ctx.audit[0]["detail"] == {
+        "op": "save",
+        "changed": {"provider_id": [None, "fake"], "model": [None, "fake-1"]},
+        "key_replaced": True,
+    }
+    assert MATRIX_KEY not in repr(ctx.audit)
+
+
+def g_disconnect_ai(ctx: Ctx) -> None:
+    only(ctx.changes, "ai_settings")
+    old, new = ctx.changes.updated("ai_settings", "workspace_id")[0]
+    assert old["encrypted_key"] == b"sealed".hex()
+    assert (new["provider_id"], new["model"], new["encrypted_key"], new["retention_days"]) == (
+        None,
+        None,
+        None,
+        45,
+    )
+    assert ctx.audit[0]["detail"] == {"op": "disconnect", "provider_id": "fake"}

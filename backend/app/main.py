@@ -11,11 +11,13 @@ from starlette.responses import RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from app.ai import keys as ai_keys
+from app.ai.provider import make_http_client
 from app.auth import GuardMiddleware
 from app.config import DEV_PEPPER, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
 from app.embedding import make_embedder
 from app.mcp_server import build_mcp, transport_security
+from app.routers import ai as ai_routes
 from app.routers import audit as audit_routes
 from app.routers import auth as auth_routes
 from app.routers import documents as document_routes
@@ -81,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             worker.cancel()
             with suppress(asyncio.CancelledError):
                 await worker
+            await app.state.ai_client.aclose()
             await engine.dispose()
 
     app = FastAPI(title="Lattice", lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -88,6 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
     app.state.embedder = embedder
+    app.state.ai_client = make_http_client(settings)  # shared by every provider call (KTD9)
     # Added first so it runs inside the guard: the bearer and Origin checks still come first.
     app.add_middleware(UploadGate, settings=settings)
     app.add_middleware(GuardMiddleware, settings=settings)
@@ -100,6 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         search_routes,
         entity_routes,
         token_routes,
+        ai_routes,
     ):
         app.include_router(module.router)
 
