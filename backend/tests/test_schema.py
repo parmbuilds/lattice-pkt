@@ -302,6 +302,7 @@ AI_TABLE_PRIVILEGES = {
     "conversations": {"SELECT", "INSERT", "UPDATE", "DELETE"},
     "turns": {"SELECT", "INSERT", "DELETE"},
     "turn_passages": {"SELECT", "INSERT", "DELETE"},
+    "turn_sources": {"SELECT", "INSERT", "DELETE"},
     "conversation_summaries": {"SELECT", "INSERT", "DELETE"},
     "summary_sources": {"SELECT", "INSERT", "DELETE"},
 }

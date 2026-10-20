@@ -9,7 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import Integer, Uuid, column, delete, func, select, update, values
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.provider import ChatProvider
@@ -21,9 +21,9 @@ from app.models import (
     SummarySource,
     Turn,
     TurnPassage,
+    TurnSource,
 )
 from app.policy import Action, Subject, readable_versions
-from app.services.search import returned_ids
 
 SYSTEM = (
     "You answer questions from the asker's approved workspace documents. "
@@ -110,6 +110,13 @@ async def guard(db: AsyncSession, subject: Subject, conversation_id: UUID) -> Me
         .order_by(TurnPassage.ordinal)
     ):
         spans[span.turn_id].append(span)
+    built_on = defaultdict(set)  # the summary sources each turn was sent with
+    for turn_id, version_id in await db.execute(
+        select(TurnSource.turn_id, TurnSource.version_id)
+        .join(Turn, Turn.id == TurnSource.turn_id)
+        .where(Turn.conversation_id == conversation_id)
+    ):
+        built_on[turn_id].add(version_id)
     summaries = (
         await db.execute(
             select(
@@ -129,26 +136,51 @@ async def guard(db: AsyncSession, subject: Subject, conversation_id: UUID) -> Me
 
     # The one read check: the same RETRIEVE rule MCP's get_evidence applies (KTD3).
     cited = {s.version_id for rows in spans.values() for s in rows} | {s[2] for s in sources}
-    readable = {
-        row.id: row
-        for row in await db.execute(
-            readable_versions(subject, Action.RETRIEVE)
-            .add_columns(DocumentVersion.title, DocumentVersion.body)
-            .where(DocumentVersion.id.in_(cited))
+    cited |= {v for versions in built_on.values() for v in versions}
+    readable = dict(
+        (
+            await db.execute(
+                readable_versions(subject, Action.RETRIEVE)
+                .add_columns(DocumentVersion.title)
+                .where(DocumentVersion.id.in_(cited))
+            )
+        ).all()
+    )
+
+    # Text only for readable versions, sliced in SQL: a body may be far longer than its spans.
+    texts = {
+        (turn_id, ordinal): text
+        for turn_id, ordinal, text in await db.execute(
+            select(
+                TurnPassage.turn_id,
+                TurnPassage.ordinal,
+                func.substr(
+                    DocumentVersion.body, TurnPassage.start + 1, TurnPassage.end - TurnPassage.start
+                ),
+            )
+            .join(Turn, Turn.id == TurnPassage.turn_id)
+            .join(DocumentVersion, DocumentVersion.id == TurnPassage.version_id)
+            .where(
+                Turn.conversation_id == conversation_id, TurnPassage.version_id.in_(list(readable))
+            )
         )
     }
 
     def passage(span: TurnPassage) -> Passage:
-        row = readable[span.version_id]
-        text = row.body[span.start : span.end]
         return Passage(
-            span.document_id, span.version_id, row.title, span.start, span.end, span.sha256, text
+            span.document_id,
+            span.version_id,
+            readable[span.version_id],
+            span.start,
+            span.end,
+            span.sha256,
+            texts[(span.turn_id, span.ordinal)],
         )
 
     kept = [
         MemoryTurn(t.ordinal, t.question, t.sentences, [passage(s) for s in spans[t.id]])
         for t in turns
-        if all(s.version_id in readable for s in spans[t.id])
+        if all(s.version_id in readable for s in spans[t.id]) and readable.keys() >= built_on[t.id]
     ]
     stale = {summary_id for summary_id, _, version_id in sources if version_id not in readable}
     if stale:  # discarded whole, never edited (R17)
@@ -171,16 +203,24 @@ async def guard(db: AsyncSession, subject: Subject, conversation_id: UUID) -> Me
 
 
 async def search_passages(db: AsyncSession, results: list[dict]) -> list[Passage]:
-    """The evidence spans of the asker's own search results (R7), read from the bodies."""
-    bodies = dict(
-        (
-            await db.execute(
-                select(DocumentVersion.id, DocumentVersion.body).where(
-                    DocumentVersion.id.in_(returned_ids(results))
-                )
-            )
-        ).all()
-    )
+    """The evidence spans of the asker's own search results (R7), sliced from the bodies in SQL."""
+    wanted = [(UUID(r["version_id"]), s["start"], s["end"]) for r in results for s in r["spans"]]
+    if not wanted:
+        return []
+    spans = values(
+        column("version_id", Uuid), column("start", Integer), column("end", Integer), name="spans"
+    ).data(wanted)
+    texts = {
+        (version, start, end): text
+        for version, start, end, text in await db.execute(
+            select(
+                spans.c.version_id,
+                spans.c.start,
+                spans.c.end,
+                func.substr(DocumentVersion.body, spans.c.start + 1, spans.c.end - spans.c.start),
+            ).join(DocumentVersion, DocumentVersion.id == spans.c.version_id)
+        )
+    }
     return [
         Passage(
             UUID(r["document_id"]),
@@ -189,7 +229,7 @@ async def search_passages(db: AsyncSession, results: list[dict]) -> list[Passage
             s["start"],
             s["end"],
             s["sha256"],
-            bodies[UUID(r["version_id"])][s["start"] : s["end"]],
+            texts[(UUID(r["version_id"]), s["start"], s["end"])],
         )
         for r in results
         for s in r["spans"]

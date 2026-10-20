@@ -182,3 +182,18 @@ def seed_summary(pg: dict[str, str], workspace_id: str, conversation_id: str, so
                 (summary, workspace_id, document_id, version_id),
             )
     return str(summary)
+
+
+def seed_turn_sources(pg: dict[str, str], workspace_id: str, turn_id: str, sources) -> None:
+    """Record (document_id, version_id) summary sources a turn was built on, inserted directly."""
+    import psycopg
+
+    from tests.conftest import plain_dsn
+
+    with psycopg.connect(plain_dsn(pg["app"])) as conn:
+        for document_id, version_id in sources:
+            conn.execute(
+                "INSERT INTO turn_sources (turn_id, workspace_id, document_id, version_id) "
+                "VALUES (%s, %s, %s, %s)",
+                (turn_id, workspace_id, document_id, version_id),
+            )

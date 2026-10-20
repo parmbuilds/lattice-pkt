@@ -140,6 +140,17 @@ def upgrade() -> None:
     )
     op.create_index("turn_passages_document_idx", "turn_passages", ["document_id"])
     op.create_table(
+        "turn_sources",
+        sa.Column("turn_id", sa.Uuid(), nullable=False),
+        sa.Column("workspace_id", sa.Uuid(), nullable=False),
+        sa.Column("document_id", sa.Uuid(), nullable=False),
+        sa.Column("version_id", sa.Uuid(), nullable=False),
+        sa.ForeignKeyConstraint(["turn_id"], ["turns.id"], ondelete="CASCADE"),
+        *_document_keys("turn_sources"),
+        sa.PrimaryKeyConstraint("turn_id", "version_id"),
+    )
+    op.create_index("turn_sources_document_idx", "turn_sources", ["document_id"])
+    op.create_table(
         "conversation_summaries",
         _id(),
         sa.Column("workspace_id", sa.Uuid(), nullable=False),
@@ -150,6 +161,9 @@ def upgrade() -> None:
         _created(),
         _conversation_key("conversation_summaries"),
         sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(
+        "conversation_summaries_conversation_idx", "conversation_summaries", ["conversation_id"]
     )
     op.create_table(
         "summary_sources",
@@ -172,8 +186,8 @@ def upgrade() -> None:
 
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ai_settings, conversations TO lattice_app")
     op.execute(
-        "GRANT SELECT, INSERT, DELETE ON turns, turn_passages, conversation_summaries, "
-        "summary_sources TO lattice_app"
+        "GRANT SELECT, INSERT, DELETE ON turns, turn_passages, turn_sources, "
+        "conversation_summaries, summary_sources TO lattice_app"
     )
 
 

@@ -7,6 +7,7 @@ lock, so every "sent" row gets exactly one outcome row (R23).
 """
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from app.models import (
     SummarySource,
     Turn,
     TurnPassage,
+    TurnSource,
     User,
     VersionDecision,
 )
@@ -48,6 +50,8 @@ NOT_COVERED = "Your documents don't cover this"
 NOT_SAVED = "This answer was not saved because a document it used is no longer available to you"
 CONVERSATION_CHANGED = "This answer was not saved because its conversation changed."
 TURN_GRACE_SECONDS = 30
+
+log = logging.getLogger("lattice.turns")
 
 
 def turn_timeout(settings: Settings) -> timedelta:
@@ -305,11 +309,12 @@ def _discarded(result: str) -> str:
 async def _save(
     sessionmaker: async_sessionmaker, t: Started, prompt: Prompt | None, checked: list[dict]
 ) -> str:
-    """Step 3: re-check under FOR SHARE on every cited document, then save the turn, any new
-    summary and the outcome together. A purge that starts afterwards waits, then deletes it."""
+    """Step 3: re-check under FOR SHARE on every document the prompt carried, then save the turn,
+    any new summary and the outcome together. A purge that starts afterwards waits, then deletes
+    it."""
     sent = prompt.sent if prompt else []
     summary = prompt.memory if prompt and prompt.condensed else None
-    sources = set(summary.summary_sources) if summary else set()
+    sources = set(prompt.memory.summary_sources) if prompt else set()  # the summary as sent
     cited = {(p.document_id, p.version_id) for p in sent}
     async with sessionmaker.begin() as db:
         # Lock order: documents, then conversations, then turns (KTD10), documents by id.
@@ -323,7 +328,7 @@ async def _save(
         if mark == "taken":
             return _discarded("conversation_changed")
         subject = await load_subject(db, t.subject.user_id, t.subject.workspace_id)
-        if mark == "gone" or await _unreadable(db, subject, {v for _, v in cited}):
+        if mark == "gone" or await _unreadable(db, subject, {v for _, v in cited | sources}):
             result = "conversation_changed" if mark == "gone" else "discarded"
             await finish(db, t.subject, t.decision, t.conversation_id, t.number, result)
             return _discarded(result)
@@ -360,8 +365,21 @@ async def _save(
                     for n, p in enumerate(sent, start=1)
                 ],
             )
-        # A summary is kept only if every version it drew on is still readable (KTD12).
-        if summary and not await _unreadable(db, subject, {v for _, v in sources}):
+        if sources:  # so the purge reaches the turn when a summary source goes stale (R28)
+            await db.execute(
+                insert(TurnSource),
+                [
+                    {
+                        "turn_id": turn_id,
+                        "workspace_id": t.subject.workspace_id,
+                        "document_id": d,
+                        "version_id": v,
+                    }
+                    for d, v in sorted(sources)
+                ],
+            )
+        # Every version a new summary drew on was re-checked above with the turn (KTD12).
+        if summary:
             summary_id = await db.scalar(
                 insert(ConversationSummary)
                 .values(
@@ -413,7 +431,8 @@ async def run(sessionmaker: async_sessionmaker, t: Started) -> AsyncIterator[str
 
         if prompt and not failure:
             ids = {f"P{n}": p.text for n, p in enumerate(sent, start=1)}
-            versions = {p.version_id for p in sent}
+            # The summary as sent counts as sent: losing its source ends the turn (R17, R29).
+            versions = {p.version_id for p in sent} | {v for _, v in prompt.memory.summary_sources}
             chunks = t.provider.stream(prompt.messages, max_tokens=t.model.max_output_tokens)
             try:
                 async with aclosing(_lines(chunks)) as lines:
@@ -438,6 +457,9 @@ async def run(sessionmaker: async_sessionmaker, t: Started) -> AsyncIterator[str
                 try:
                     final = await _save(sessionmaker, t, prompt, checked)
                 except Exception:
+                    log.exception(
+                        "saving turn %s of conversation %s failed", t.number, t.conversation_id
+                    )
                     await _end(sessionmaker, t, "discarded")
                     final = _discarded("discarded")
             ended = True

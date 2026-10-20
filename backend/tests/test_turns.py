@@ -18,7 +18,14 @@ from app.main import create_app
 from tests.conftest import plain_dsn
 from tests.endpoint_grounds import AI_PROVIDER, sse
 from tests.endpoint_world import sql
-from tests.helpers import create_workspace, join, signed_in
+from tests.helpers import (
+    create_workspace,
+    join,
+    seed_summary,
+    seed_turn,
+    seed_turn_sources,
+    signed_in,
+)
 from tests.test_answering import _approved, _group
 
 QUESTION = "How do I restart checkout?"
@@ -28,6 +35,7 @@ DOCS = [
     ("Checkout timing", "Checkout restarts take two minutes."),
 ]
 AI_KEYS = {"ai_key_encryption_keys": [SecretStr(DEV_AI_KEY)]}
+LATENCY = ("Payments latency", "Watch the payments latency dashboard.")
 
 
 def _app(settings, provider: AiProvider = AI_PROVIDER):
@@ -228,6 +236,66 @@ async def test_a_withdrawal_after_the_second_sentence_discards_the_turn(settings
     assert _turns(pg, conversation) == []
     assert _outcomes(pg, ws) == {1: "discarded"}
     assert _mark(pg, conversation)[1] is None
+
+
+async def _summarized(owner, pg) -> tuple[str, str, dict]:
+    """A conversation carrying a summary drawn only on a document the question does not find."""
+    ws, _, conversation = await _connected(owner)
+    latency = await _approved(owner, ws, *LATENCY)
+    seed_summary(pg, ws, conversation, [(latency["id"], latency["pending_version_id"])])
+    return ws, conversation, latency
+
+
+async def test_withdrawing_a_summary_source_mid_stream_discards_the_turn(settings, app, pg, steer):
+    """R17, R29: the summary as sent is checked before each sentence, as passages are."""
+    provider = steer(hold_after=1)
+    async with signed_in(settings, app) as owner:
+        ws, conversation, latency = await _summarized(owner, pg)
+        turn = asyncio.create_task(_ask(owner, ws, conversation))
+        await provider.held()
+        withdrawn = await owner.post(f"/api/workspaces/{ws}/documents/{latency['id']}/withdraw")
+        assert withdrawn.status_code == 204
+        provider.release()
+        response = await turn
+
+    passages = sse(response.text)[0][1]["passages"]
+    assert latency["pending_version_id"] not in {p["version_id"] for p in passages}
+    assert "<summary>" in provider.requests[0][1]["content"]
+    assert _names(response) == ["passages", "sentence", "discarded"]
+    assert sse(response.text)[-1][1] == {"notice": turns.NOT_SAVED}
+    assert _turns(pg, conversation) == []
+    assert _outcomes(pg, ws) == {1: "discarded"}
+
+
+async def test_a_turn_built_on_a_summary_is_purged_with_its_sources(settings, app, pg, steer):
+    """R28, KTD4: turn_sources lets the purge reach the turn, and each deleted turn is counted
+    once, even when its passage and its source go stale together."""
+    steer()
+    async with signed_in(settings, app) as owner:
+        ws, conversation, latency = await _summarized(owner, pg)
+        assert _names(await _ask(owner, ws, conversation))[-1] == "done"
+        cited = (latency["id"], latency["pending_version_id"])
+        other, seeded = seed_turn(pg, ws, owner.user_id, [cited])
+        seed_turn_sources(pg, ws, seeded, [cited])
+        recorded = sql(
+            pg,
+            "SELECT s.version_id::text FROM turn_sources s JOIN turns t ON t.id = s.turn_id "
+            "WHERE t.conversation_id = %s",
+            conversation,
+        )
+        assert recorded == [(latency["pending_version_id"],)]
+        withdrawn = await owner.post(f"/api/workspaces/{ws}/documents/{latency['id']}/withdraw")
+        assert withdrawn.status_code == 204
+
+    assert _turns(pg, conversation) == []
+    left_out = "SELECT left_out FROM conversations WHERE id = %s"
+    assert sql(pg, left_out, conversation) == sql(pg, left_out, other) == [(1,)]
+    receipt = sql(
+        pg,
+        "SELECT detail FROM audit_events WHERE document_id = %s AND action = 'purge'",
+        latency["id"],
+    )
+    assert receipt[0][0]["removed"]["turns"] == 2
 
 
 async def test_leaving_the_sharing_group_mid_stream_discards_the_turn(settings, app, pg, steer):

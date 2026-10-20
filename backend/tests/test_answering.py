@@ -29,7 +29,15 @@ from app.mcp_server import _evidence
 from app.services.search import search
 from tests.conftest import plain_dsn
 from tests.endpoint_world import sql
-from tests.helpers import add_document, approve, create_workspace, join, seed_summary, signed_in
+from tests.helpers import (
+    add_document,
+    approve,
+    create_workspace,
+    join,
+    seed_summary,
+    seed_turn_sources,
+    signed_in,
+)
 
 MODEL = AiModel(id="m", label="M", context_tokens=8000, max_output_tokens=1000)
 
@@ -171,6 +179,27 @@ async def test_leaving_the_sharing_group_hides_its_turns_and_drops_the_summary(
     await _agrees_with_get_evidence(sessions, mei.user_id, ws, after, [incident, runbook])
     again = await _guard(sessions, mei.user_id, ws, conversation)
     assert (again.left_out, again.summary_dropped) == (1, False)  # still hidden; dropped once
+
+
+async def test_a_turn_built_on_a_summary_source_the_asker_lost_is_hidden(settings, pg, sessions):
+    """R17: a turn's summary sources are read-checked like its passages."""
+    async with signed_in(settings) as owner, signed_in(settings) as mei:
+        ws = await create_workspace(owner)
+        await join(owner, ws, mei)
+        payments = await _group(owner, ws, "Payments", mei.user_id)
+        platform = await _group(owner, ws, "Platform", mei.user_id)
+        incident = await _approved(owner, ws, "Incident", seed.INCIDENT, payments)
+        runbook = await _approved(owner, ws, "Runbook", seed.TIMEOUTS, platform)
+        conversation = _conversation(pg, ws, mei.user_id)
+        _turn(pg, ws, conversation, 1, runbook, seed.TIMEOUTS)
+        ((turn,),) = sql(pg, "SELECT id FROM turns WHERE conversation_id = %s", conversation)
+        seed_turn_sources(pg, ws, turn, [(incident["id"], incident["pending_version_id"])])
+        before = await _guard(sessions, mei.user_id, ws, conversation)
+        assert [t.ordinal for t in before.turns] == [1]
+        left = await owner.delete(f"/api/workspaces/{ws}/groups/{payments}/members/{mei.user_id}")
+        assert left.status_code == 204
+    after = await _guard(sessions, mei.user_id, ws, conversation)
+    assert (after.turns, after.left_out) == ([], 1)
 
 
 async def test_a_summary_with_a_withdrawn_source_is_dropped_whole_and_not_sent(

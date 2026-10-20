@@ -15,6 +15,7 @@ WHOLE_PARENT = "deletes its whole turn or summary"
 # A stale span deletes the turn or summary it belongs to, whose rows then cascade (KTD4).
 PARENTS = {
     "turn_passages": ("turns", "turn_id"),
+    "turn_sources": ("turns", "turn_id"),
     "summary_sources": ("conversation_summaries", "summary_id"),
 }
 
@@ -24,6 +25,8 @@ PARENTS = {
 # documents -> conversations -> turns, and documents -> derivations -> chunks -> intake_payloads.
 DERIVED_TABLES = {
     "turn_passages": WHOLE_PARENT,
+    # After turn_passages: its deleted turns cascade out of here, so each is counted once.
+    "turn_sources": WHOLE_PARENT,
     "summary_sources": WHOLE_PARENT,
     "chunks": CASCADE,
     "derivations": DELETE_BY_VERSION,
@@ -53,7 +56,7 @@ async def purge_document(db: AsyncSession, document_id: UUID, reason: str) -> No
             parent_name, key = PARENTS[name]
             # Counted only when present, so receipts of workspaces without Ask are unchanged.
             if count := await _delete_parents(db, name, parent_name, key, stale):
-                removed[parent_name] = count
+                removed[parent_name] = removed.get(parent_name, 0) + count
         elif rule == CASCADE:
             removed[name] = await db.scalar(select(func.count()).select_from(table).where(*stale))
         else:

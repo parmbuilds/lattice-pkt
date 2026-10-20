@@ -550,6 +550,23 @@ class TurnPassage(Base):
     )
 
 
+class TurnSource(Base):
+    """A version the summary a turn was sent with drew on; the purge deletes the whole turn when
+    it goes stale (R17, R28)."""
+
+    __tablename__ = "turn_sources"
+    turn_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("turns.id", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[uuid.UUID]
+    document_id: Mapped[uuid.UUID]
+    version_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    __table_args__ = (
+        *_document_keys("turn_sources"),
+        Index("turn_sources_document_idx", "document_id"),  # purge_document
+    )
+
+
 class ConversationSummary(Base):
     """Condensed memory of a conversation's oldest turns; discarded whole, never edited (R17)."""
 
@@ -561,7 +578,11 @@ class ConversationSummary(Base):
     covers_through: Mapped[int] = mapped_column(Integer)  # the last turn number it condenses
     model: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()
-    __table_args__ = (_conversation_key("conversation_summaries"),)
+    __table_args__ = (
+        _conversation_key("conversation_summaries"),
+        # Every conversation delete cascades here (retention sweep, member removal).
+        Index("conversation_summaries_conversation_idx", "conversation_id"),
+    )
 
 
 class SummarySource(Base):
