@@ -70,6 +70,11 @@ WRITE_MATRIX = [
     (Action.TRANSFER_OWNERSHIP, {"target_role": "admin"}, None, (Y, N, N, N)),
     (Action.TRANSFER_OWNERSHIP, {"target_role": "member"}, None, (N, N, N, N)),
     (Action.MANAGE_OWN_TOKENS, {}, None, (Y, Y, Y, Y)),
+    (Action.VIEW_OWN_SEARCHES, {}, None, (Y, Y, Y, Y)),
+    (Action.ASK, {}, None, (Y, Y, Y, Y)),
+    (Action.MANAGE_OWN_CONVERSATIONS, {}, None, (Y, Y, Y, Y)),
+    (Action.VIEW_AI_SETTINGS, {}, None, (Y, Y, Y, Y)),
+    (Action.MANAGE_AI_SETTINGS, {}, None, (Y, Y, N, N)),
     (Action.REVOKE_INVITE, {}, None, (Y, Y, N, N)),
 ]
 
@@ -109,7 +114,16 @@ def test_mcp_channel_allows_retrieval_only():
     serving = replace(DOC, version_is_serving=True)
     assert decide(agent, Action.RETRIEVE, serving).allowed is True
     assert decide(agent, Action.SEARCH).allowed is True
-    for action in (Action.APPROVE, Action.SHARE, Action.INVITE, Action.MANAGE_OWN_TOKENS):
+    for action in (
+        Action.APPROVE,
+        Action.SHARE,
+        Action.INVITE,
+        Action.MANAGE_OWN_TOKENS,
+        Action.ASK,
+        Action.MANAGE_OWN_CONVERSATIONS,
+        Action.VIEW_AI_SETTINGS,
+        Action.MANAGE_AI_SETTINGS,
+    ):
         decision = decide(agent, action, DOC, target_group_id=GROUP_G, target_role="member")
         assert decision.allowed is False
         assert decision.rule == "channel.mcp_retrieval_only"

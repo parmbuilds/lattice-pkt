@@ -5,11 +5,17 @@ world in tests/endpoint_world.py, not derived from app.policy, so it stays an in
 """
 
 import hmac
+import json
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
+from pydantic import SecretStr
+
+from app.ai import keys
+from app.config import DEV_AI_KEY, AiModel, AiProvider, Settings
 from tests.endpoint_world import MEMBERS, Changes, World, sql
 
 MANAGERS = {"owner", "admin"}
@@ -532,6 +538,18 @@ def g_search(ctx: Ctx) -> None:
     ground_search_results(ctx.pg, ctx.body["results"])
 
 
+def g_search_history(ctx: Ctx) -> None:
+    unchanged(ctx)
+    rows = sql(
+        ctx.pg,
+        "SELECT detail->>'query' FROM audit_events WHERE workspace_id = %s AND actor_user_id = %s "
+        "AND action = 'search' AND outcome = 'allow' ORDER BY id DESC LIMIT 10",
+        ctx.world.ws,
+        ctx.id(ctx.actor),
+    )
+    assert [s["query"] for s in ctx.body["searches"]] == [query for (query,) in rows]
+
+
 def g_audit(ctx: Ctx) -> None:
     unchanged(ctx)
     rows = sql(
@@ -626,3 +644,234 @@ def g_delete_entity(ctx: Ctx) -> None:
     only(ctx.changes, "entities", "entity_aliases")
     assert [r["id"] for r in ctx.changes.removed["entities"]] == [ctx.world.entity]
     assert [r["alias"] for r in ctx.changes.removed["entity_aliases"]] == ["payments"]
+
+
+# --- AI settings ----------------------------------------------------------------------------
+
+AI_PROVIDER = AiProvider(
+    id="fake",
+    label="Fake",
+    kind="fake",
+    models=[AiModel(id="fake-1", label="Fake 1", context_tokens=8000, max_output_tokens=500)],
+)
+MATRIX_KEY = "sk-matrix-SECRET-key"
+_PROVIDERS = [{"id": "fake", "label": "Fake", "models": [{"id": "fake-1", "label": "Fake 1"}]}]
+
+
+def seed_ai(world: World, pg: dict) -> None:
+    """Connect the world's workspace (a stand-in ciphertext: these calls never decrypt it)."""
+    sql(
+        pg,
+        "INSERT INTO ai_settings (workspace_id, provider_id, model, encrypted_key, retention_days)"
+        " VALUES (%s, 'fake', 'fake-1', 'sealed', 45) RETURNING workspace_id",
+        world.ws,
+    )
+
+
+def _ai_view(ctx: Ctx, enabled: bool, retention: int) -> dict:
+    view = {
+        "providers": _PROVIDERS,
+        "enabled": enabled,
+        "provider_id": "fake" if enabled else None,
+        "model": "fake-1" if enabled else None,
+        "retention_days": retention,
+    }
+    return view | ({"key_status": "ok"} if ctx.actor in MANAGERS else {})
+
+
+def g_ai_settings(ctx: Ctx) -> None:
+    unchanged(ctx)
+    assert ctx.body == _ai_view(ctx, True, 45)  # members never see the key status (R30)
+
+
+def g_connect_ai(ctx: Ctx) -> None:
+    only(ctx.changes, "ai_settings")
+    (row,) = ctx.changes.added["ai_settings"]
+    assert (row["provider_id"], row["model"], row["key_status"], row["retention_days"]) == (
+        "fake",
+        "fake-1",
+        "ok",
+        30,
+    )
+    assert MATRIX_KEY.encode().hex() not in row["encrypted_key"]  # stored encrypted (R4)
+    assert ctx.body == _ai_view(ctx, True, 30)
+    assert ctx.audit[0]["detail"] == {
+        "op": "save",
+        "changed": {"provider_id": [None, "fake"], "model": [None, "fake-1"]},
+        "key_replaced": True,
+    }
+    assert MATRIX_KEY not in repr(ctx.audit)
+
+
+def g_disconnect_ai(ctx: Ctx) -> None:
+    only(ctx.changes, "ai_settings")
+    old, new = ctx.changes.updated("ai_settings", "workspace_id")[0]
+    assert old["encrypted_key"] == b"sealed".hex()
+    assert (new["provider_id"], new["model"], new["encrypted_key"], new["retention_days"]) == (
+        None,
+        None,
+        None,
+        45,
+    )
+    assert ctx.audit[0]["detail"] == {"op": "disconnect", "provider_id": "fake"}
+
+
+# --- Conversations --------------------------------------------------------------------------
+
+# Each member's conversation cites a version they may read; "other" wrote the private ledger.
+_CITES = {
+    "owner": "shared",
+    "admin": "shared",
+    "author": "shared",
+    "reader": "shared",
+    "other": "private",
+}
+_SPAN = (0, 7)
+
+
+def conversation_of(world: World, actor: str) -> str:
+    """Each member's own conversation; outsiders and anonymous callers try the author's."""
+    return str(uuid.uuid5(uuid.UUID(world.ws), actor if actor in MEMBERS else "author"))
+
+
+def seed_conversations(world: World, pg: dict) -> None:
+    """One conversation per member, each with one turn citing a span it may read."""
+    for actor, doc in _CITES.items():
+        conversation = conversation_of(world, actor)
+        sql(
+            pg,
+            "INSERT INTO conversations (id, workspace_id, user_id, title) VALUES (%s, %s, %s, %s)"
+            " RETURNING id",
+            conversation,
+            world.ws,
+            world.users[actor],
+            f"{actor} asks",
+        )
+        ((turn,),) = sql(
+            pg,
+            "INSERT INTO turns (workspace_id, conversation_id, ordinal, question, sentences, "
+            "outcome, provider_id, model) VALUES (%s, %s, 1, 'Restart?', '[]', 'answered', "
+            "'fake', 'fake-1') RETURNING id",
+            world.ws,
+            conversation,
+        )
+        sql(
+            pg,
+            "INSERT INTO turn_passages (turn_id, ordinal, workspace_id, document_id, version_id, "
+            "start, \"end\", sha256) VALUES (%s, 1, %s, %s, %s, %s, %s, 'x') RETURNING turn_id",
+            turn,
+            world.ws,
+            world.docs[doc]["id"],
+            world.docs[doc]["v1"],
+            *_SPAN,
+        )
+
+
+def _own_conversations(ctx: Ctx) -> list[str]:
+    return [
+        str(c)
+        for (c,) in sql(
+            ctx.pg,
+            "SELECT id FROM conversations WHERE workspace_id = %s AND user_id = %s",
+            ctx.world.ws,
+            ctx.id(ctx.actor),
+        )
+    ]
+
+
+def g_new_conversation(ctx: Ctx) -> None:
+    only(ctx.changes, "conversations")
+    (row,) = ctx.changes.added["conversations"]
+    assert (row["id"], row["user_id"], row["title"]) == (ctx.body["id"], ctx.id(ctx.actor), "Pods")
+    assert ctx.body["title"] == "Pods" and recent(row["last_turn_at"])
+
+
+def g_conversations(ctx: Ctx) -> None:
+    unchanged(ctx)
+    assert [c["id"] for c in ctx.body["conversations"]] == _own_conversations(ctx)
+    assert _own_conversations(ctx) == [conversation_of(ctx.world, ctx.actor)]
+
+
+def g_conversation(ctx: Ctx) -> None:
+    unchanged(ctx)
+    version = ctx.world.docs[_CITES[ctx.actor]]["v1"]
+    title, body = doc_row(ctx, version)
+    assert (ctx.body["id"], ctx.body["left_out"]) == (conversation_of(ctx.world, ctx.actor), 0)
+    ((turn,),) = [ctx.body["turns"]]
+    ((passage,),) = [turn["passages"]]
+    assert (turn["question"], passage["version_id"], passage["title"]) == (
+        "Restart?",
+        version,
+        title,
+    )
+    assert passage["text"] == body[slice(*_SPAN)]  # re-read from the version body (KTD4)
+
+
+def g_delete_conversation(ctx: Ctx) -> None:
+    only(ctx.changes, "conversations")
+    own = conversation_of(ctx.world, ctx.actor)
+    assert [r["id"] for r in ctx.changes.removed["conversations"]] == [own]
+    assert ctx.changes.added["conversations"] == []
+    assert sql(ctx.pg, "SELECT count(*) FROM turns WHERE conversation_id = %s", own) == [(0,)]
+
+
+# --- Ask turns ------------------------------------------------------------------------------
+
+ASKED = "How do I restart checkout?"
+
+
+def sse(text: str) -> list[tuple[str, dict]]:
+    """A turn's server-sent events as (name, data) pairs."""
+    blocks = [block.split("\n") for block in text.split("\n\n") if block]
+    return [(n.removeprefix("event: "), json.loads(d.removeprefix("data: "))) for n, d in blocks]
+
+
+def seed_ask(world: World, pg: dict) -> None:
+    """Connect the fake provider with a key sealed as a save would (a turn decrypts it), and give
+    each member a conversation."""
+    sealing = Settings.model_construct(ai_key_encryption_keys=[SecretStr(DEV_AI_KEY)])
+    sealed = keys.encrypt(sealing, uuid.UUID(world.ws), "fake", MATRIX_KEY)
+    sql(
+        pg,
+        "INSERT INTO ai_settings (workspace_id, provider_id, model, encrypted_key)"
+        " VALUES (%s, 'fake', 'fake-1', %s) RETURNING workspace_id",
+        world.ws,
+        sealed,
+    )
+    seed_conversations(world, pg)
+
+
+def g_ask(ctx: Ctx) -> None:
+    only(ctx.changes, "conversations")
+    own = conversation_of(ctx.world, ctx.actor)
+    old, new = updated_one(ctx, "conversations")
+    assert old["id"] == own and (new["in_flight_turn"], new["in_flight_at"]) == (2, None)
+    assert new["last_turn_at"] > old["last_turn_at"]
+
+    names = [name for name, _ in ctx.body["events"]]
+    assert (names[0], set(names[1:-1]), names[-1]) == ("passages", {"sentence"}, "done")
+    passages = ctx.body["events"][0][1]["passages"]
+    versions = sorted({p["version_id"] for p in passages})
+    assert set(versions) <= set(retrievable(ctx.world, ctx.actor))
+    saved = sql(
+        ctx.pg,
+        "SELECT p.ordinal, p.version_id::text FROM turns t JOIN turn_passages p "
+        "ON p.turn_id = t.id WHERE t.conversation_id = %s AND t.ordinal = 2 ORDER BY p.ordinal",
+        own,
+    )
+    assert saved == [(int(p["id"][1:]), p["version_id"]) for p in passages]
+
+    # Both rows ground the turn: what was sent and to whom, then the outcome, never the answer.
+    sent, outcome = ctx.audit
+    assert sorted(str(v) for v in sent["returned_version_ids"]) == versions
+    assert sent["detail"] | {"count": 0} == {
+        "conversation_id": own,
+        "turn": 2,
+        "query": ASKED,
+        "count": 0,
+        "provider_id": "fake",
+        "model": "fake-1",
+    }
+    assert outcome["detail"] == {"conversation_id": own, "turn": 2, "outcome": "answered"}
+    answer = [data["text"] for name, data in ctx.body["events"] if name == "sentence"]
+    assert not any(text in repr(ctx.audit) for text in answer) and MATRIX_KEY not in repr(ctx.audit)

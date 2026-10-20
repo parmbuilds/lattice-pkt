@@ -132,3 +132,68 @@ async def retrievable_ids(pg, workspace_id: str, uid: str) -> set[str]:
             return {str(v) for v in await db.scalars(readable_versions(subject, Action.RETRIEVE))}
     finally:
         await engine.dispose()
+
+
+def seed_turn(
+    pg: dict[str, str], workspace_id: str, user_id: str, cited: list[tuple[str, str]]
+) -> tuple[str, str]:
+    """A conversation with one turn citing (document_id, version_id) spans, inserted directly."""
+    import psycopg
+
+    from tests.conftest import plain_dsn
+
+    with psycopg.connect(plain_dsn(pg["app"])) as conn:
+        conversation = conn.execute(
+            "INSERT INTO conversations (workspace_id, user_id, title) VALUES (%s, %s, 'q') "
+            "RETURNING id",
+            (workspace_id, user_id),
+        ).fetchone()[0]
+        turn = conn.execute(
+            "INSERT INTO turns (workspace_id, conversation_id, ordinal, question, sentences, "
+            "outcome, provider_id, model) VALUES (%s, %s, 1, 'q', '[]', 'answered', 'fake', 'm') "
+            "RETURNING id",
+            (workspace_id, conversation),
+        ).fetchone()[0]
+        for ordinal, (document_id, version_id) in enumerate(cited, start=1):
+            conn.execute(
+                "INSERT INTO turn_passages (turn_id, ordinal, workspace_id, document_id, "
+                "version_id, start, \"end\", sha256) VALUES (%s, %s, %s, %s, %s, 0, 1, 'x')",
+                (turn, ordinal, workspace_id, document_id, version_id),
+            )
+    return str(conversation), str(turn)
+
+
+def seed_summary(pg: dict[str, str], workspace_id: str, conversation_id: str, sources):
+    """Insert a summary drawing on (document_id, version_id) sources; returns its id."""
+    import psycopg
+
+    from tests.conftest import plain_dsn
+
+    with psycopg.connect(plain_dsn(pg["app"])) as conn:
+        summary = conn.execute(
+            "INSERT INTO conversation_summaries (workspace_id, conversation_id, text, "
+            "covers_through, model) VALUES (%s, %s, 's', 1, 'm') RETURNING id",
+            (workspace_id, conversation_id),
+        ).fetchone()[0]
+        for document_id, version_id in sources:
+            conn.execute(
+                "INSERT INTO summary_sources (summary_id, workspace_id, document_id, version_id) "
+                "VALUES (%s, %s, %s, %s)",
+                (summary, workspace_id, document_id, version_id),
+            )
+    return str(summary)
+
+
+def seed_turn_sources(pg: dict[str, str], workspace_id: str, turn_id: str, sources) -> None:
+    """Record (document_id, version_id) summary sources a turn was built on, inserted directly."""
+    import psycopg
+
+    from tests.conftest import plain_dsn
+
+    with psycopg.connect(plain_dsn(pg["app"])) as conn:
+        for document_id, version_id in sources:
+            conn.execute(
+                "INSERT INTO turn_sources (turn_id, workspace_id, document_id, version_id) "
+                "VALUES (%s, %s, %s, %s)",
+                (turn_id, workspace_id, document_id, version_id),
+            )

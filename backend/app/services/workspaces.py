@@ -32,9 +32,10 @@ async def membership(db: AsyncSession, workspace_id: UUID, user_id: UUID) -> Mem
 async def remove_member(
     db: AsyncSession, workspace_id: UUID, user_id: UUID, authorized_role: str
 ) -> None:
-    """Group memberships and direct grants go with the membership (FK cascade); tokens are
-    revoked, not deleted, so audit rows keep their reference. Authorship stays. Guarded on
-    the authorized role, like set_role: a concurrent promotion makes this a conflict."""
+    """Group memberships, direct grants and conversations (R22) go with the membership (FK
+    cascade, in this statement); tokens are revoked, not deleted, so audit rows keep their
+    reference. Authorship stays. Guarded on the authorized role, like set_role: a concurrent
+    promotion makes this a conflict."""
     result = await db.execute(
         delete(Membership).where(
             Membership.workspace_id == workspace_id,

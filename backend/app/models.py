@@ -446,3 +446,156 @@ class EntityAlias(Base):
             "entity_aliases_workspace_alias_key", "workspace_id", text("lower(alias)"), unique=True
         ),
     )
+
+
+class AiSettings(Base):
+    """A workspace's provider, model, encrypted key and retention (R2, R20); never the plain key."""
+
+    __tablename__ = "ai_settings"
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider_id: Mapped[str | None] = mapped_column(Text)  # null: written answers are off
+    model: Mapped[str | None] = mapped_column(Text)
+    encrypted_key: Mapped[bytes | None] = mapped_column(LargeBinary)
+    key_status: Mapped[str] = mapped_column(Text, server_default=text("'ok'"))
+    retention_days: Mapped[int] = mapped_column(Integer, server_default=text("30"))
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (
+        CheckConstraint("key_status IN ('ok', 'rejected')", name="ai_settings_key_status_check"),
+        CheckConstraint("retention_days BETWEEN 1 AND 365", name="ai_settings_retention_check"),
+        CheckConstraint(
+            "num_nulls(provider_id, model, encrypted_key) IN (0, 3)", name="ai_settings_provider"
+        ),
+    )
+
+
+class Conversation(Base):
+    """One person's private Ask conversation (R19); goes with their membership (R22)."""
+
+    __tablename__ = "conversations"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID]
+    user_id: Mapped[uuid.UUID]
+    title: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    last_turn_at: Mapped[datetime] = mapped_column(server_default=func.now())  # retention clock
+    # The turn being answered and when it started (KTD10); a stale mark counts as clear.
+    in_flight_turn: Mapped[int | None] = mapped_column(Integer)
+    in_flight_at: Mapped[datetime | None]
+    # Purged since the asker last looked (KTD4): shown once as notices (R15, R17), then reset.
+    left_out: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    summary_dropped: Mapped[bool] = mapped_column(server_default=text("false"))
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "user_id"],
+            ["memberships.workspace_id", "memberships.user_id"],
+            ondelete="CASCADE",
+            name="conversations_membership_fkey",
+        ),
+        UniqueConstraint("workspace_id", "id", name="conversations_workspace_id_id_key"),
+        Index("conversations_user_idx", "workspace_id", "user_id", "last_turn_at"),
+    )
+
+
+def _conversation_key(table: str) -> ForeignKeyConstraint:
+    return ForeignKeyConstraint(
+        ["workspace_id", "conversation_id"],
+        ["conversations.workspace_id", "conversations.id"],
+        ondelete="CASCADE",
+        name=f"{table}_conversation_fkey",
+    )
+
+
+class Turn(Base):
+    """One saved question and its checked answer; never rewritten, only deleted (KTD4)."""
+
+    __tablename__ = "turns"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID]
+    conversation_id: Mapped[uuid.UUID]
+    ordinal: Mapped[int] = mapped_column(Integer)
+    question: Mapped[str] = mapped_column(Text)
+    sentences: Mapped[list] = mapped_column(JSONB)  # text, markers and support flags
+    outcome: Mapped[str] = mapped_column(Text)
+    provider_id: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('answered', 'partly_supported', 'not_covered')", name="turns_outcome_check"
+        ),
+        _conversation_key("turns"),
+        UniqueConstraint("conversation_id", "ordinal", name="turns_conversation_ordinal_key"),
+    )
+
+
+class TurnPassage(Base):
+    """A span a turn sent to the model; the purge deletes the whole turn when it goes stale."""
+
+    __tablename__ = "turn_passages"
+    turn_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("turns.id", ondelete="CASCADE"), primary_key=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)  # the P# marker
+    workspace_id: Mapped[uuid.UUID]
+    document_id: Mapped[uuid.UUID]
+    version_id: Mapped[uuid.UUID]
+    start: Mapped[int] = mapped_column(Integer)
+    end: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        *_document_keys("turn_passages"),
+        Index("turn_passages_document_idx", "document_id"),  # purge_document
+    )
+
+
+class TurnSource(Base):
+    """A version the summary a turn was sent with drew on; the purge deletes the whole turn when
+    it goes stale (R17, R28)."""
+
+    __tablename__ = "turn_sources"
+    turn_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("turns.id", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[uuid.UUID]
+    document_id: Mapped[uuid.UUID]
+    version_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    __table_args__ = (
+        *_document_keys("turn_sources"),
+        Index("turn_sources_document_idx", "document_id"),  # purge_document
+    )
+
+
+class ConversationSummary(Base):
+    """Condensed memory of a conversation's oldest turns; discarded whole, never edited (R17)."""
+
+    __tablename__ = "conversation_summaries"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID]
+    conversation_id: Mapped[uuid.UUID]
+    text: Mapped[str] = mapped_column(Text)
+    covers_through: Mapped[int] = mapped_column(Integer)  # the last turn number it condenses
+    model: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    __table_args__ = (
+        _conversation_key("conversation_summaries"),
+        # Every conversation delete cascades here (retention sweep, member removal).
+        Index("conversation_summaries_conversation_idx", "conversation_id"),
+    )
+
+
+class SummarySource(Base):
+    """A version a summary drew on; the purge deletes the summary when it goes stale."""
+
+    __tablename__ = "summary_sources"
+    summary_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversation_summaries.id", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[uuid.UUID]
+    document_id: Mapped[uuid.UUID]
+    version_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    __table_args__ = (
+        *_document_keys("summary_sources"),
+        Index("summary_sources_document_idx", "document_id"),  # purge_document
+    )

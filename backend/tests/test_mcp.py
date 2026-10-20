@@ -7,10 +7,13 @@ import psycopg
 import pytest
 from mcp import Client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+from pydantic import SecretStr
 
+from app.config import DEV_AI_KEY
 from app.main import create_app
 from app.mcp_server import DECLARED
 from tests.conftest import live_server, plain_dsn
+from tests.endpoint_grounds import AI_PROVIDER
 from tests.helpers import (
     PASSWORD,
     add_document,
@@ -248,6 +251,40 @@ async def test_mcp_and_ui_search_return_the_same_versions(settings, server):
     assert len(ui) == 2
 
 
+async def test_agents_get_the_same_results_and_tools_with_a_provider_connected(settings):
+    """Covers AE7: retrieval results only, never a generated answer (R24)."""
+    connected = settings.model_copy(
+        update={"ai_providers": [AI_PROVIDER], "ai_key_encryption_keys": [SecretStr(DEV_AI_KEY)]}
+    )
+
+    async def results(base_url, token) -> dict:
+        async with agent(base_url, token) as client:
+            return _payload(await client.call_tool("search_knowledge", {"query": "nginx"}))
+
+    with live_server(create_app(connected)) as base_url:
+        async with signed_in(connected) as owner:
+            ws = await create_workspace(owner)
+            await approve(owner, ws, await add_document(owner, ws, "Proxy", "nginx upstream"))
+            token = await _token(owner, ws)
+            before = await results(base_url, token)
+            saved = await owner.put(
+                f"/api/workspaces/{ws}/ai/settings",
+                json={
+                    "provider_id": "fake",
+                    "model": "fake-1",
+                    "retention_days": 30,
+                    "api_key": "k",
+                },
+            )
+            assert saved.json()["enabled"]
+            after = await results(base_url, token)
+            async with agent(base_url, token) as client:
+                tools = await client.list_tools()
+    assert after == before and len(before["results"]) == 1
+    assert set(after) == {"note", "results"}
+    assert sorted(t.name for t in tools.tools) == ["get_evidence", "search_knowledge"]
+
+
 async def test_a_demoted_admins_agent_keeps_working_with_member_access(settings, server):
     """Covers AE8."""
     async with signed_in(settings) as owner, signed_in(settings) as admin:
@@ -324,3 +361,30 @@ async def test_get_evidence_returns_exactly_the_requested_span(settings, server)
     assert "attempted_overrides" not in with_span["detail"]
     assert with_unknown["detail"]["returned_spans"] == [[serving, 0, 7]]
     assert with_unknown["detail"]["attempted_overrides"] == {"page": 2}
+
+
+async def test_search_history_lists_your_own_searches_and_your_agents_newest_first(
+    settings, server
+):
+    async with signed_in(settings) as owner, signed_in(settings) as reader:
+        ws = await create_workspace(owner)
+        await join(owner, ws, reader)
+        doc = await add_document(owner, ws, title="Checkout runbook", body="checkout timeouts")
+        await approve(owner, ws, doc)
+        search = f"/api/workspaces/{ws}/search"
+        found = (await owner.get(search, params={"q": "checkout"})).json()["results"]
+        await owner.get(search, params={"q": "timeouts", "via": "ask"})
+        await _agent_search(server, await _token(owner, ws), "checkout agent")
+        await reader.get(search, params={"q": "only the reader asked this"})
+
+        history = (await owner.get(f"{search}/history")).json()["searches"]
+        assert [(s["source"], s["query"], s["token_name"]) for s in history] == [
+            ("agent", "checkout agent", "agent"),
+            ("ask", "timeouts", None),
+            ("search", "checkout", None),
+        ]
+        assert history[2]["count"] == len(found)
+        for i in range(10):
+            await owner.get(search, params={"q": f"query {i}"})
+        latest = (await owner.get(f"{search}/history")).json()["searches"]
+        assert [s["query"] for s in latest] == [f"query {i}" for i in range(9, -1, -1)]

@@ -1,74 +1,19 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Component } from 'vue'
-import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
+import { describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import ReviewCard from '../components/ReviewCard.vue'
-import { me, type Role } from '../session'
 import Approvals from './Approvals.vue'
 import Audit from './Audit.vue'
 import DocumentDetail from './DocumentDetail.vue'
 import Documents from './Documents.vue'
 import Entities from './Entities.vue'
 import Groups from './Groups.vue'
+import Overview from './Overview.vue'
 import Search from './Search.vue'
 import Tokens from './Tokens.vue'
-
-const EVIL = '<img src=x onerror=alert(1)>'
-let mounted: VueWrapper | undefined
-
-// A route value that needs a status other than 200, or that changes per call.
-class Reply {
-  status: number
-  body: unknown
-  constructor(status: number, body: unknown) {
-    this.status = status
-    this.body = body
-  }
-}
-type Handler = (init: RequestInit) => Reply
-
-// Responses keyed by "METHOD /path" (query string ignored).
-function mockApi(routes: Record<string, unknown>) {
-  const fetchMock = vi.fn(async (path: string, init: RequestInit) => {
-    const key = `${init.method ?? 'GET'} ${path.split('?')[0]}`
-    if (!(key in routes)) return new Response(null, { status: 404 })
-    let value = routes[key]
-    if (typeof value === 'function') value = (value as Handler)(init)
-    const reply = value instanceof Reply ? value : new Reply(200, value)
-    return new Response(JSON.stringify(reply.body), { status: reply.status })
-  })
-  vi.stubGlobal('fetch', fetchMock)
-  return fetchMock
-}
+import { EVIL, field, mockApi, mounted, renderPage, Reply, track } from './testing'
 
 const DOC_DETAIL = '/w/:workspaceId/documents/:documentId'
-
-async function renderPage(
-  path: string,
-  routePath: string,
-  page: Component,
-  role: Role = 'admin',
-  extra: { path: string; component: Component }[] = [],
-) {
-  me.value = {
-    user: { id: 'u1', email: 'ada@example.com', name: 'Ada' },
-    csrf_token: 'csrf',
-    memberships: [{ workspace_id: 'ws1', workspace_name: 'Acme', role }],
-  }
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: routePath, component: page }, ...extra] })
-  await router.push(path)
-  mounted = mount(RouterView, { global: { plugins: [router] }, attachTo: document.body })
-  await flushPromises()
-  return mounted
-}
-
-const field = (w: VueWrapper, label: string) => w.findAll('label').find((l) => l.text().startsWith(label))!.find('input')
-
-afterEach(() => {
-  mounted?.unmount()
-  mounted = undefined
-  vi.unstubAllGlobals()
-})
 
 describe('Tokens page', () => {
   it('shows the secret only from the creation response, never after the list reloads', async () => {
@@ -208,13 +153,15 @@ const fileInput = (w: VueWrapper, file: File) => {
 async function mountReview(decide = vi.fn(async (action: () => Promise<unknown>) => void (await action()))) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: ReviewCard }] })
   await router.push('/')
-  mounted = mount(ReviewCard, {
-    props: { doc: draft, base: '/api/workspaces/ws1', workspaceId: 'ws1', decide },
-    global: { plugins: [router] },
-    attachTo: document.body,
-  })
+  const wrapper = track(
+    mount(ReviewCard, {
+      props: { doc: draft, base: '/api/workspaces/ws1', workspaceId: 'ws1', decide },
+      global: { plugins: [router] },
+      attachTo: document.body,
+    }),
+  )
   await flushPromises()
-  return mounted
+  return wrapper
 }
 
 describe('Documents upload', () => {
@@ -520,5 +467,93 @@ describe('Entities page', () => {
     expect(document.querySelector('img')).toBeNull()
     const co = [...document.querySelectorAll('a')].find((a) => a.textContent === 'Ledger')!
     expect(co.getAttribute('href')).toBe('/w/ws1/entities/e2')
+  })
+})
+
+describe('Overview page', () => {
+  const doc = (id: string, over: Record<string, unknown>) => ({
+    id,
+    title: `Doc ${id}`,
+    author_id: 'u2',
+    author_name: 'Bea',
+    withdrawn: false,
+    serving_version_id: null,
+    pending_version_id: null,
+    ...over,
+  })
+  const DOCS = {
+    documents: [
+      doc('d1', { serving_version_id: 'v1' }),
+      doc('d2', { serving_version_id: 'v2', pending_version_id: 'v3' }),
+      doc('d3', { author_id: 'u1', pending_version_id: 'v4', title: 'My draft' }),
+      doc('d4', { serving_version_id: 'v5', withdrawn: true }),
+    ],
+  }
+  const tile = (label: string) =>
+    [...document.querySelectorAll('.titleblock > div')].find((c) => c.querySelector('dt')?.textContent === label)!
+      .querySelector('dd span')!.textContent
+
+  it('counts only the listed documents and shows a member their own waiting draft', async () => {
+    const fetchMock = mockApi({
+      'GET /api/workspaces/ws1/documents': DOCS,
+      'GET /api/workspaces/ws1/search/history': { searches: [] },
+    })
+    await renderPage('/w/ws1/overview', '/w/:workspaceId/overview', Overview, 'member')
+    expect([tile('Approved · serving'), tile('Drafts'), tile('Withdrawn'), tile('Written by you')]).toEqual(['2', '2', '1', '1'])
+    const waiting = document.querySelector('[aria-label="Waiting on you"]')!.textContent
+    expect(waiting).toContain('My draft is waiting for an admin to approve it')
+    expect(waiting).not.toContain('Doc d2')
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes('/invites'))).toBe(false)
+    expect(document.body.textContent).toContain('No queries yet.')
+  })
+
+  it('shows a manager the drafts to review and open invite links', async () => {
+    mockApi({
+      'GET /api/workspaces/ws1/documents': DOCS,
+      'GET /api/workspaces/ws1/invites': { invites: [{ id: 'i1' }] },
+      'GET /api/workspaces/ws1/search/history': { searches: [] },
+    })
+    await renderPage('/w/ws1/overview', '/w/:workspaceId/overview', Overview, 'admin')
+    const waiting = document.querySelector('[aria-label="Waiting on you"]')!.textContent
+    expect(waiting).toContain('2 drafts to review')
+    expect(waiting).toContain('1 invite link not used yet')
+  })
+
+  it('asks through search marked as Ask, quotes the passages and refreshes the history', async () => {
+    let searched = 0
+    const fetchMock = mockApi({
+      'GET /api/workspaces/ws1/documents': { documents: [] },
+      'GET /api/workspaces/ws1/search': {
+        results: [
+          {
+            version_id: 'v1',
+            document_id: 'd1',
+            title: 'Checkout runbook',
+            snippet: `check the [[latency]] ${EVIL}`,
+            approved_at: '2026-10-15T00:00:00Z',
+            approved_by: 'Arjun',
+            spans: [{ start: 36, end: 193, sha256: 'x' }],
+          },
+        ],
+      },
+      'GET /api/workspaces/ws1/search/history': () =>
+        new Reply(200, {
+          searches: searched++
+            ? [{ occurred_at: '2026-10-20T00:00:00Z', source: 'ask', token_name: null, query: 'latency', count: 1 }]
+            : [],
+        }),
+    })
+    const w = await renderPage('/w/ws1/overview', '/w/:workspaceId/overview', Overview, 'member')
+    await w.find('#ask-input').setValue('latency')
+    await w.find('#ask-input').trigger('keydown', { key: 'Enter' }) // Enter asks; Shift+Enter would add a line
+    await flushPromises()
+    const ask = fetchMock.mock.calls.map(([path]) => String(path)).find((p) => p.startsWith('/api/workspaces/ws1/search?'))!
+    expect(new URLSearchParams(ask.split('?')[1]).get('via')).toBe('ask')
+    expect(document.body.textContent).toContain('Found in 1 approved document you can read')
+    expect(document.querySelector('article mark')!.textContent).toBe('latency')
+    expect(document.querySelector('article img')).toBeNull() // snippets render as text
+    expect(document.body.textContent).toContain('chars 36–193')
+    expect(document.querySelector('[aria-label="Ask again: latency"]')!.textContent).toContain('Ask')
+    expect(document.querySelector('[aria-label="Ask again: latency"]')!.textContent).toContain('1 match')
   })
 })

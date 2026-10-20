@@ -1,19 +1,23 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NOT_FOUND } from '../api'
 import Wordmark from '../components/Wordmark.vue'
-import { me, signOut, useWorkspace } from '../session'
+import { me, rememberWorkspace, signOut, useWorkspace } from '../session'
 
 const route = useRoute()
 const router = useRouter()
 const w = useWorkspace()
+
+// Only a workspace the session confirms membership of becomes the next sign-in's landing page.
+watchEffect(() => w.role && rememberWorkspace(w.workspaceId))
 
 // Presentation only: the API refuses manager actions for members whatever the menu shows.
 const sections = computed(() => [
   {
     label: 'Knowledge',
     links: [
+      ['overview', 'Overview'],
       ['documents', 'Documents'],
       ['search', 'Search'],
       ['entities', 'Entities'],
@@ -29,6 +33,7 @@ const sections = computed(() => [
             ['members', 'Members'],
             ['groups', 'Groups'],
             ['audit', 'Audit trail'],
+            ['ai', 'AI answers'],
           ],
         },
       ]

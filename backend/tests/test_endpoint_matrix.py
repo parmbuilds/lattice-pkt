@@ -12,20 +12,33 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import pytest
+from pydantic import SecretStr
 
+from app.config import DEV_AI_KEY
 from app.main import create_app
 from tests.endpoint_grounds import (
+    AI_PROVIDER,
+    ASKED,
     EVERY_MEMBER,
     MANAGERS,
+    MATRIX_KEY,
     NOT_FOUND,
     UPLOADED,
     Ctx,
+    conversation_of,
     g_add_to_group,
+    g_ai_settings,
+    g_ask,
     g_audit,
+    g_connect_ai,
+    g_conversation,
+    g_conversations,
     g_create_document,
     g_decision,
+    g_delete_conversation,
     g_delete_entity,
     g_delete_group,
+    g_disconnect_ai,
     g_edit,
     g_entities,
     g_entity,
@@ -34,6 +47,7 @@ from tests.endpoint_grounds import (
     g_invites,
     g_list_documents,
     g_members,
+    g_new_conversation,
     g_new_entity,
     g_new_group,
     g_new_invite,
@@ -48,6 +62,7 @@ from tests.endpoint_grounds import (
     g_revoke_token,
     g_role,
     g_search,
+    g_search_history,
     g_share,
     g_tokens,
     g_transfer,
@@ -56,6 +71,10 @@ from tests.endpoint_grounds import (
     g_upload_version,
     g_version,
     g_withdraw,
+    seed_ai,
+    seed_ask,
+    seed_conversations,
+    sse,
     unchanged,
 )
 from tests.endpoint_world import (
@@ -83,6 +102,8 @@ class Case:
     ground: Callable[[Ctx], None]
     audited_when_allowed: Callable[[str], bool] = lambda actor: True
     multipart: bool = False  # the request body is httpx `files`, not JSON
+    prepare: Callable[[World, dict], None] = lambda world, pg: None  # extra rows, before the call
+    audit_count: int = 1  # rows an allowed call writes; an Ask turn writes two (R23)
 
 
 # --- The matrix -----------------------------------------------------------------------------
@@ -414,6 +435,16 @@ CASES = [
         g_search,
     ),
     Case(
+        "list own searches",
+        "GET",
+        W + "/search/history",
+        lambda w, a: (w.url("/search/history"), None),
+        EVERY_MEMBER,
+        200,
+        "view_own_searches",
+        g_search_history,
+    ),
+    Case(
         "list entities",
         "GET",
         W + "/entities",
@@ -504,18 +535,113 @@ CASES = [
         "manage_own_tokens",
         g_revoke_token,
     ),
+    Case(
+        "view AI settings",
+        "GET",
+        W + "/ai/settings",
+        lambda w, a: (w.url("/ai/settings"), None),
+        EVERY_MEMBER,
+        200,
+        "view_ai_settings",
+        g_ai_settings,
+        prepare=seed_ai,
+    ),
+    Case(
+        "connect AI",
+        "PUT",
+        W + "/ai/settings",
+        lambda w, a: (
+            w.url("/ai/settings"),
+            {"provider_id": "fake", "model": "fake-1", "retention_days": 30, "api_key": MATRIX_KEY},
+        ),
+        MANAGERS,
+        200,
+        "manage_ai_settings",
+        g_connect_ai,
+    ),
+    Case(
+        "disconnect AI",
+        "DELETE",
+        W + "/ai/settings",
+        lambda w, a: (w.url("/ai/settings"), None),
+        MANAGERS,
+        204,
+        "manage_ai_settings",
+        g_disconnect_ai,
+        prepare=seed_ai,
+    ),
+    Case(
+        "start a conversation",
+        "POST",
+        W + "/conversations",
+        lambda w, a: (w.url("/conversations"), {"title": "Pods"}),
+        EVERY_MEMBER,
+        201,
+        "manage_own_conversations",
+        g_new_conversation,
+    ),
+    Case(
+        "list own conversations",
+        "GET",
+        W + "/conversations",
+        lambda w, a: (w.url("/conversations"), None),
+        EVERY_MEMBER,
+        200,
+        "manage_own_conversations",
+        g_conversations,
+        prepare=seed_conversations,
+    ),
+    # Each member opens their own conversation; outsiders and anonymous callers try the author's.
+    Case(
+        "reopen own conversation",
+        "GET",
+        W + "/conversations/{conversation_id}",
+        lambda w, a: (w.url(f"/conversations/{conversation_of(w, a)}"), None),
+        EVERY_MEMBER,
+        200,
+        "manage_own_conversations",
+        g_conversation,
+        prepare=seed_conversations,
+    ),
+    Case(
+        "delete own conversation",
+        "DELETE",
+        W + "/conversations/{conversation_id}",
+        lambda w, a: (w.url(f"/conversations/{conversation_of(w, a)}"), None),
+        EVERY_MEMBER,
+        204,
+        "manage_own_conversations",
+        g_delete_conversation,
+        prepare=seed_conversations,
+    ),
+    # Each member asks in their own conversation; outsiders and anonymous callers try the author's.
+    Case(
+        "ask in own conversation",
+        "POST",
+        W + "/conversations/{conversation_id}/turns",
+        lambda w, a: (w.url(f"/conversations/{conversation_of(w, a)}/turns"), {"question": ASKED}),
+        EVERY_MEMBER,
+        200,
+        "ask",
+        g_ask,
+        prepare=seed_ask,
+        audit_count=2,
+    ),
 ]
 
 
 @pytest.fixture(scope="module")
 def app(settings):
-    return create_app(settings)
+    # The fake provider answers the key check without a network call.
+    keys = {"ai_providers": [AI_PROVIDER], "ai_key_encryption_keys": [SecretStr(DEV_AI_KEY)]}
+    return create_app(settings.model_copy(update=keys))
 
 
 @pytest.mark.parametrize("actor", ACTORS)
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name.replace(" ", "-"))
 async def test_endpoint(case: Case, actor: str, settings, pg, app):
     async with build_world(settings, pg, app) as world:
+        case.prepare(world, pg)
         path, body = case.request(world, actor)
         before, audit_from = snapshot(pg, world), last_audit_id(pg)
         sent = {"files": body} if case.multipart else {"json": body}
@@ -526,7 +652,10 @@ async def test_endpoint(case: Case, actor: str, settings, pg, app):
         allowed = actor in case.allowed
         expected = case.status if allowed else 401 if actor == "anon" else 404
         assert response.status_code == expected, response.text
-        payload = response.json() if response.content else {}
+        if response.headers.get("content-type", "").startswith("text/event-stream"):
+            payload = {"events": sse(response.text)}
+        else:
+            payload = response.json() if response.content else {}
         if allowed:
             case.ground(Ctx(world, actor, payload, changes, audit, pg))
         else:  # a refusal looks like absence and changes nothing (R29)
@@ -535,14 +664,16 @@ async def test_endpoint(case: Case, actor: str, settings, pg, app):
 
         if actor in MEMBERS and (allowed and case.audited_when_allowed(actor) or not allowed):
             # Purge receipts are the system's own rows; grounds check them (KTD8).
-            ((row,),) = [[r for r in audit if r["channel"] != "system"]]
-            assert (str(row["actor_user_id"]), row["action"], row["channel"]) == (
-                world.users[actor],
-                case.action,
-                "ui",
-            )
-            assert row["outcome"] == ("allow" if allowed else "deny"), row
-            assert row["rule_id"], row  # every decision names the rule that made it (R27)
+            rows = [r for r in audit if r["channel"] != "system"]
+            assert len(rows) == (case.audit_count if allowed else 1), rows
+            for row in rows:
+                assert (str(row["actor_user_id"]), row["action"], row["channel"]) == (
+                    world.users[actor],
+                    case.action,
+                    "ui",
+                )
+                assert row["outcome"] == ("allow" if allowed else "deny"), row
+                assert row["rule_id"], row  # every decision names the rule that made it (R27)
         else:  # outsiders and anonymous callers never write into the workspace trail
             assert audit == [], audit
 

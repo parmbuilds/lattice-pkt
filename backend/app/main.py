@@ -10,13 +10,18 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import RedirectResponse
 from starlette.staticfiles import StaticFiles
 
+from app.ai import keys as ai_keys
+from app.ai import retention
+from app.ai.provider import make_http_client
 from app.auth import GuardMiddleware
 from app.config import DEV_PEPPER, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
 from app.embedding import make_embedder
 from app.mcp_server import build_mcp, transport_security
+from app.routers import ai as ai_routes
 from app.routers import audit as audit_routes
 from app.routers import auth as auth_routes
+from app.routers import conversations as conversation_routes
 from app.routers import documents as document_routes
 from app.routers import entities as entity_routes
 from app.routers import groups as group_routes
@@ -44,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.secret_pepper == DEV_PEPPER and not settings.insecure_dev_cookies:
         # The default is public; outside local development it would make every verifier forgeable.
         raise RuntimeError("Set LATTICE_SECRET_PEPPER to a private value.")
+    ai_keys.check_master_keys(settings)
     embedder = make_embedder(settings)
     engine = make_engine(settings.database_url)
     sessionmaker = make_sessionmaker(engine)
@@ -71,14 +77,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # A mounted sub-app's lifespan does not run, so the host runs the MCP session manager.
-        worker = asyncio.create_task(run_worker(sessionmaker, app.state.embedder, settings))
+        tasks = [
+            asyncio.create_task(run_worker(sessionmaker, app.state.embedder, settings)),
+            asyncio.create_task(retention.run_sweep(sessionmaker, settings)),
+        ]
         try:
             async with mcp.session_manager.run():
                 yield
         finally:
-            worker.cancel()
-            with suppress(asyncio.CancelledError):
-                await worker
+            for task in tasks:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            await app.state.ai_client.aclose()
             await engine.dispose()
 
     app = FastAPI(title="Lattice", lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -86,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
     app.state.embedder = embedder
+    app.state.ai_client = make_http_client(settings)  # shared by every provider call (KTD9)
     # Added first so it runs inside the guard: the bearer and Origin checks still come first.
     app.add_middleware(UploadGate, settings=settings)
     app.add_middleware(GuardMiddleware, settings=settings)
@@ -98,6 +110,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         search_routes,
         entity_routes,
         token_routes,
+        ai_routes,
+        conversation_routes,
     ):
         app.include_router(module.router)
 

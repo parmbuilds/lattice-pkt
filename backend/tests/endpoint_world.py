@@ -50,6 +50,8 @@ TENANT_TABLES = (
     "chunks",
     "entities",
     "entity_aliases",
+    "ai_settings",
+    "conversations",
 )
 
 

@@ -47,6 +47,8 @@ Everything belongs to a workspace, and nothing crosses a workspace boundary. One
 | Manage groups, view members and audit | Yes | Yes | No |
 | Invite | Members or admins | Members | No |
 | Promote, demote, remove admins; transfer ownership | Yes | No | No |
+| Connect an AI provider, change the model, key or conversation retention | Yes | Yes | No (sees the provider and model) |
+| Ask with written answers; open and delete their own conversations | Own only | Own only | Own only |
 
 - **Lifecycle.** Every document version is immutable. A new document or an edit becomes a draft; an admin or the owner approves one exact version, which then serves until a newer version is approved. Withdrawal stops every version being served and is final.
 - **Retrieval is approved-only for everyone.** Drafts and withdrawn documents appear in the UI for their author and managers, never in search or MCP results.
@@ -94,6 +96,8 @@ CI runs the backend tests, the property suite and the frontend build and tests o
 | Hybrid search (keywords plus embeddings, reciprocal rank fusion) with evidence spans; MCP `get_evidence` returns a span by `start` and `end` | Implemented and tested, including the property suite |
 | Entity registry and a query-time, policy-filtered entity graph in the UI | Implemented and tested |
 | Retrieval and lifecycle benchmark on the synthetic corpus | Implemented; `pytest -m benchmark` |
+| Written answers in Ask from an OpenAI-compatible provider: checked citations, streamed sentences, private resumable conversations, retention, two audit rows per turn | Implemented and tested with a fake provider; no real provider checked in CI |
+| AI entity suggestions, an AI approval assistant, provider embeddings, usage limits on AI answers | Deferred |
 | OCR for scanned PDFs, an approximate vector index, LLM entity extraction or community reports, the graph over MCP, original-file download, zip upload | Deferred |
 | MCP OAuth authorization server | Deferred |
 | Agent accounts, scoped delegation, folders, nested groups, SSO | Deferred |

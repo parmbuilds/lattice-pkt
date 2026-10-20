@@ -17,25 +17,59 @@ export class ApiError extends Error {
 
 export const NOT_FOUND = 'Not found or not permitted.'
 
-export async function api<T = unknown>(
-  path: string,
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'GET',
-  body?: unknown,
-): Promise<T> {
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+
+function send(path: string, method: Method, body: unknown, signal?: AbortSignal): Promise<Response> {
   const headers: Record<string, string> = {}
   // FormData goes as-is so the browser sets the multipart boundary.
   const form = body instanceof FormData
   if (body !== undefined && !form) headers['Content-Type'] = 'application/json'
   if (method !== 'GET') headers['X-CSRF-Token'] = csrfToken
-  const res = await fetch(path, {
+  return fetch(path, {
     method,
     headers,
     credentials: 'same-origin',
     body: body === undefined || form ? (body as FormData | undefined) : JSON.stringify(body),
+    signal,
   })
-  if (res.ok) return (res.status === 204 ? undefined : await res.json()) as T
+}
+
+async function refuse(res: Response): Promise<never> {
   const refusal = res.status === 404 || res.status >= 500 ? undefined : await res.json().catch(() => undefined)
   throw new ApiError(res.status, errorMessage(res.status, refusal?.detail), refusal)
+}
+
+export async function api<T = unknown>(path: string, method: Method = 'GET', body?: unknown): Promise<T> {
+  const res = await send(path, method, body)
+  if (res.ok) return (res.status === 204 ? undefined : await res.json()) as T
+  return refuse(res)
+}
+
+export type StreamEvent = { event: string; data: any }
+
+// Server-sent events over a POST (KTD7): EventSource cannot POST or send the CSRF header.
+export async function* postStream(path: string, body: unknown, signal?: AbortSignal): AsyncGenerator<StreamEvent> {
+  const res = await send(path, 'POST', body, signal)
+  if (!res.ok) await refuse(res)
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop()!
+    for (const frame of frames) {
+      let event = 'message'
+      const data: string[] = []
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''))
+      }
+      if (data.length) yield { event, data: JSON.parse(data.join('\n')) }
+    }
+  }
 }
 
 function errorMessage(status: number, detail: unknown): string {
