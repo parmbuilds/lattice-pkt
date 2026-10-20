@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.ai import retention
 from app.db import make_sessionmaker
 from app.main import create_app
+from app.models import AiSettings
+from app.services.ai_settings import DEFAULT_RETENTION_DAYS
 from tests.endpoint_world import sql
 from tests.helpers import create_workspace, join, seed_summary, seed_turn, signed_in
 from tests.test_answering import _approved, _group, _turn
@@ -149,6 +151,9 @@ async def test_an_expired_conversation_reads_as_absent_and_the_sweep_deletes_it(
     settings, app, pg, sessions
 ):
     """KTD11: with no settings row the default 30 days applies."""
+    assert AiSettings.__table__.c.retention_days.server_default.arg.text == str(
+        DEFAULT_RETENTION_DAYS
+    )
     async with signed_in(settings, app) as owner:
         ws = await create_workspace(owner)
         expired, fresh = await _create(owner, ws, "Old"), await _create(owner, ws, "New")

@@ -19,7 +19,7 @@ from app.ai.provider import ProviderError, make_provider
 from app.config import AiProvider, Settings
 from app.models import AiSettings, Conversation
 
-DEFAULT_RETENTION_DAYS = 30  # the column's default, for a workspace with no settings row yet
+DEFAULT_RETENTION_DAYS = 30
 # The key check sends no workspace text (KTD9).
 KEY_CHECK = [{"role": "user", "content": "Reply with the word OK."}]
 KEY_CHECK_TOKENS = 16
@@ -62,7 +62,7 @@ def view(settings: Settings, row: AiSettings | None, *, manager: bool) -> dict:
         "enabled": enabled,
         "provider_id": row.provider_id if row else None,
         "model": row.model if row else None,
-        "retention_days": row.retention_days if row else DEFAULT_RETENTION_DAYS,
+        "retention_days": retention_days(row),
     }
     if manager:
         shown["key_status"] = row.key_status if enabled else None
@@ -76,19 +76,27 @@ def chosen(settings: Settings, wanted: SettingsUpdate) -> AiProvider:
     return entry
 
 
+def retention_days(row: AiSettings | None) -> int:
+    return row.retention_days if row else DEFAULT_RETENTION_DAYS
+
+
+def retention_cutoff(days: int) -> datetime:
+    """Conversations whose last turn is older than this have expired."""
+    return datetime.now(UTC) - timedelta(days=days)
+
+
 def _expired(workspace_id: UUID, cutoff: datetime):
     return Conversation.workspace_id == workspace_id, Conversation.last_turn_at < cutoff
 
 
 async def expiring(db: AsyncSession, workspace_id: UUID, days: int) -> tuple[datetime, int]:
     """The cutoff a retention of `days` sets now, and how many conversations it deletes."""
-    cutoff = datetime.now(UTC) - timedelta(days=days)
+    cutoff = retention_cutoff(days)
     count = await db.scalar(select(func.count()).where(*_expired(workspace_id, cutoff)))
     return cutoff, count
 
 
 async def delete_expired(db: AsyncSession, workspace_id: UUID, cutoff: datetime) -> int:
-    # Turns, passages and summaries go with their conversation (FK cascade).
     result = await db.execute(delete(Conversation).where(*_expired(workspace_id, cutoff)))
     return result.rowcount
 
@@ -166,7 +174,7 @@ def changes(row: AiSettings | None, wanted: SettingsUpdate) -> dict[str, list]:
     old = {
         "provider_id": row.provider_id if row else None,
         "model": row.model if row else None,
-        "retention_days": row.retention_days if row else DEFAULT_RETENTION_DAYS,
+        "retention_days": retention_days(row),
     }
     new = wanted.model_dump(include=set(old))
     return {field: [old[field], new[field]] for field in old if old[field] != new[field]}

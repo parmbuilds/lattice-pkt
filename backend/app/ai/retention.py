@@ -3,7 +3,7 @@ sweep next to the derivation worker deletes it."""
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -25,8 +25,7 @@ SWEEP_SECONDS = 3600
 async def cutoff(db: AsyncSession, workspace_id: UUID) -> datetime:
     """Conversations whose last turn is older than this have expired."""
     row = await ai_settings.current(db, workspace_id)
-    days = row.retention_days if row else ai_settings.DEFAULT_RETENTION_DAYS
-    return datetime.now(UTC) - timedelta(days=days)
+    return ai_settings.retention_cutoff(ai_settings.retention_days(row))
 
 
 async def own_unexpired(db: AsyncSession, subject: Subject) -> tuple:

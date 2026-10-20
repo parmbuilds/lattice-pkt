@@ -35,7 +35,7 @@ async def save_ai_settings(subject: Member, request: Request, db: DB):
     row = await svc.current(db, workspace_id, lock=True)
 
     cutoff = None
-    retention = row.retention_days if row else svc.DEFAULT_RETENTION_DAYS
+    retention = svc.retention_days(row)
     if wanted.retention_days < retention:  # a shorter period applies to existing ones (R20)
         cutoff, count = await svc.expiring(db, workspace_id, wanted.retention_days)
         if count and wanted.confirm_deletions != count:

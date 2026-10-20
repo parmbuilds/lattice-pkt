@@ -35,7 +35,7 @@ MODEL = AiModel(id="m", label="M", context_tokens=8000, max_output_tokens=1000)
 
 
 class Recorder:
-    """A provider that records condensing calls; streaming is not U5's to call."""
+    """A provider that records condensing calls."""
 
     def __init__(self):
         self.calls: list[list[dict[str, str]]] = []
@@ -52,7 +52,7 @@ async def sessions(settings):
     await engine.dispose()
 
 
-# --- Fixtures written as the turn route will write them ------------------------------------
+# --- Fixtures written as the turn route writes them ------------------------------------
 
 
 async def _approved(owner, ws, title, body, group=None) -> dict:

@@ -104,19 +104,7 @@ async def read_conversation(conversation_id: UUID, subject: Member, db: DB) -> d
             "question": t.question,
             "sentences": t.sentences,
             "outcome": outcomes[t.ordinal],
-            "passages": [
-                {
-                    "document_id": str(p.document_id),
-                    "version_id": str(p.version_id),
-                    "title": p.title,
-                    "start": p.start,
-                    "end": p.end,
-                    "text": p.text,
-                    "approved_by": approvals.get(p.version_id, (None, None))[0],
-                    "approved_at": approvals.get(p.version_id, (None, None))[1],
-                }
-                for p in t.passages
-            ],
+            "passages": [turns.passage_view(p, approvals) for p in t.passages],
         }
         for t in memory.turns
     ]
@@ -135,7 +123,6 @@ async def delete_conversation(conversation_id: UUID, subject: Member, db: DB) ->
         Action.MANAGE_OWN_CONVERSATIONS,
         detail={"op": "delete", "conversation_id": str(conversation_id)},
     )
-    # Turns, passages and summaries go with their conversation (FK cascade).
     result = await db.execute(
         delete(Conversation).where(
             Conversation.id == conversation_id, *await retention.own_unexpired(db, subject)

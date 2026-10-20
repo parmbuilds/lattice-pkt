@@ -17,6 +17,7 @@ from app.services.derive import config_hash
 log = logging.getLogger("lattice.search")
 
 MAX_QUERY = 1000
+DEFAULT_LIMIT = 10  # what Search and Ask return unless asked for more
 # Plain-text match markers, never HTML (KTD9, KTD11).
 HEADLINE_OPTIONS = "StartSel=[[, StopSel=]], MaxFragments=2, MaxWords=20, MinWords=5"
 RRF_K = 60  # the customary reciprocal-rank-fusion constant

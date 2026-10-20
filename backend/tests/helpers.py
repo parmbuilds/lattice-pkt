@@ -134,9 +134,10 @@ async def retrievable_ids(pg, workspace_id: str, uid: str) -> set[str]:
         await engine.dispose()
 
 
-def seed_turn(pg: dict[str, str], workspace_id: str, user_id: str, cited: list[tuple[str, str]]):
-    """Insert a conversation and one turn citing (document_id, version_id) spans, as the runtime
-    role; returns (conversation_id, turn_id). Lets lifecycle tests run before the turn route."""
+def seed_turn(
+    pg: dict[str, str], workspace_id: str, user_id: str, cited: list[tuple[str, str]]
+) -> tuple[str, str]:
+    """A conversation with one turn citing (document_id, version_id) spans, inserted directly."""
     import psycopg
 
     from tests.conftest import plain_dsn

@@ -17,13 +17,12 @@ from app.config import AiModel
 from app.models import (
     Conversation,
     ConversationSummary,
-    Document,
     DocumentVersion,
     SummarySource,
     Turn,
     TurnPassage,
 )
-from app.policy import Action, Subject, read_clause
+from app.policy import Action, Subject, readable_versions
 from app.services.search import returned_ids
 
 SYSTEM = (
@@ -98,9 +97,11 @@ async def guard(db: AsyncSession, subject: Subject, conversation_id: UUID) -> Me
             .with_for_update()
         )
     ).one()
-    turns = await db.scalars(
-        select(Turn).where(Turn.conversation_id == conversation_id).order_by(Turn.ordinal)
-    )
+    turns = (
+        await db.scalars(
+            select(Turn).where(Turn.conversation_id == conversation_id).order_by(Turn.ordinal)
+        )
+    ).all()
     spans = defaultdict(list)
     for span in await db.scalars(
         select(TurnPassage)
@@ -128,13 +129,12 @@ async def guard(db: AsyncSession, subject: Subject, conversation_id: UUID) -> Me
 
     # The one read check: the same RETRIEVE rule MCP's get_evidence applies (KTD3).
     cited = {s.version_id for rows in spans.values() for s in rows} | {s[2] for s in sources}
-    d, v = Document.__table__, DocumentVersion.__table__
     readable = {
         row.id: row
         for row in await db.execute(
-            select(v.c.id, v.c.title, v.c.body)
-            .select_from(v.join(d, v.c.document_id == d.c.id))
-            .where(v.c.id.in_(cited), read_clause(subject, Action.RETRIEVE, d, v))
+            readable_versions(subject, Action.RETRIEVE)
+            .add_columns(DocumentVersion.title, DocumentVersion.body)
+            .where(DocumentVersion.id.in_(cited))
         )
     }
 
@@ -145,7 +145,6 @@ async def guard(db: AsyncSession, subject: Subject, conversation_id: UUID) -> Me
             span.document_id, span.version_id, row.title, span.start, span.end, span.sha256, text
         )
 
-    turns = list(turns)
     kept = [
         MemoryTurn(t.ordinal, t.question, t.sentences, [passage(s) for s in spans[t.id]])
         for t in turns

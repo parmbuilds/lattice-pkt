@@ -39,7 +39,7 @@ from app.models import (
 )
 from app.policy import Action, Decision, Subject, readable_versions
 from app.services import ai_settings
-from app.services.search import search
+from app.services.search import DEFAULT_LIMIT, search
 
 AI_OFF = "AI answers are off for this workspace."
 IN_PROGRESS = "An answer is already in progress"
@@ -47,7 +47,6 @@ UNAVAILABLE = "Answers are unavailable right now."
 NOT_COVERED = "Your documents don't cover this"
 NOT_SAVED = "This answer was not saved because a document it used is no longer available to you"
 CONVERSATION_CHANGED = "This answer was not saved because its conversation changed."
-ASK_RESULTS = 10  # the search Ask runs today
 TURN_GRACE_SECONDS = 30
 
 
@@ -139,7 +138,7 @@ async def start(
     number = max(saved or 0, last or 0) + 1
 
     memory = await guard(db, subject, conversation_id)
-    cap = min(ASK_RESULTS, settings.search_limit_cap)
+    cap = min(DEFAULT_LIMIT, settings.search_limit_cap)
     results = await search(db, subject, question, cap, state.embedder, settings)
     new = await search_passages(db, results)
     sent = build_prompt(memory, new, question)[1]
@@ -204,11 +203,10 @@ def _event(name: str, data: dict) -> str:
     return f"event: {name}\ndata: {json.dumps(data)}\n\n"
 
 
-def _passage(n: int, p: Passage, approvals: dict[UUID, tuple[str, str]]) -> dict:
-    """A sent passage as Ask shows it, with its document and approval (R11)."""
+def passage_view(p: Passage, approvals: dict[UUID, tuple[str, str]]) -> dict:
+    """A passage as Ask shows it, live or reopened, with its document and approval (R11)."""
     approved_by, approved_at = approvals.get(p.version_id, (None, None))
     return {
-        "id": f"P{n}",
         "document_id": str(p.document_id),
         "version_id": str(p.version_id),
         "title": p.title,
@@ -224,7 +222,9 @@ def _passages(t: Started, sent: list[Passage]) -> str:
     return _event(
         "passages",
         {
-            "passages": [_passage(n, p, t.approvals) for n, p in enumerate(sent, start=1)],
+            "passages": [
+                {"id": f"P{n}"} | passage_view(p, t.approvals) for n, p in enumerate(sent, start=1)
+            ],
             # The guard reset these, so this is the asker's one chance to see them (R15, R17).
             "left_out": t.memory.left_out,
             "summary_dropped": t.memory.summary_dropped,

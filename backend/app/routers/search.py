@@ -10,7 +10,7 @@ from app.auth import Member
 from app.db import DB
 from app.models import AccessToken, AuditEvent, Conversation
 from app.policy import Action
-from app.services.search import returned_ids, returned_spans, search
+from app.services.search import DEFAULT_LIMIT, returned_ids, returned_spans, search
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/search", tags=["search"])
 
@@ -23,7 +23,7 @@ async def search_documents(
     db: DB,
     request: Request,
     q: str = "",
-    limit: int = Query(default=10, ge=1),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1),
     via: Literal["search", "ask"] = "search",
 ) -> dict:
     app = request.app.state
