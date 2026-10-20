@@ -5,6 +5,7 @@ world in tests/endpoint_world.py, not derived from app.policy, so it stays an in
 """
 
 import hmac
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -709,3 +710,102 @@ def g_disconnect_ai(ctx: Ctx) -> None:
         45,
     )
     assert ctx.audit[0]["detail"] == {"op": "disconnect", "provider_id": "fake"}
+
+
+# --- Conversations --------------------------------------------------------------------------
+
+# Each member's conversation cites a version they may read; "other" wrote the private ledger.
+_CITES = {
+    "owner": "shared",
+    "admin": "shared",
+    "author": "shared",
+    "reader": "shared",
+    "other": "private",
+}
+_SPAN = (0, 7)
+
+
+def conversation_of(world: World, actor: str) -> str:
+    """Each member's own conversation; outsiders and anonymous callers try the author's."""
+    return str(uuid.uuid5(uuid.UUID(world.ws), actor if actor in MEMBERS else "author"))
+
+
+def seed_conversations(world: World, pg: dict) -> None:
+    """One conversation per member, each with one turn citing a span it may read."""
+    for actor, doc in _CITES.items():
+        conversation = conversation_of(world, actor)
+        sql(
+            pg,
+            "INSERT INTO conversations (id, workspace_id, user_id, title) VALUES (%s, %s, %s, %s)"
+            " RETURNING id",
+            conversation,
+            world.ws,
+            world.users[actor],
+            f"{actor} asks",
+        )
+        ((turn,),) = sql(
+            pg,
+            "INSERT INTO turns (workspace_id, conversation_id, ordinal, question, sentences, "
+            "outcome, provider_id, model) VALUES (%s, %s, 1, 'Restart?', '[]', 'answered', "
+            "'fake', 'fake-1') RETURNING id",
+            world.ws,
+            conversation,
+        )
+        sql(
+            pg,
+            "INSERT INTO turn_passages (turn_id, ordinal, workspace_id, document_id, version_id, "
+            "start, \"end\", sha256) VALUES (%s, 1, %s, %s, %s, %s, %s, 'x') RETURNING turn_id",
+            turn,
+            world.ws,
+            world.docs[doc]["id"],
+            world.docs[doc]["v1"],
+            *_SPAN,
+        )
+
+
+def _own_conversations(ctx: Ctx) -> list[str]:
+    return [
+        str(c)
+        for (c,) in sql(
+            ctx.pg,
+            "SELECT id FROM conversations WHERE workspace_id = %s AND user_id = %s",
+            ctx.world.ws,
+            ctx.id(ctx.actor),
+        )
+    ]
+
+
+def g_new_conversation(ctx: Ctx) -> None:
+    only(ctx.changes, "conversations")
+    (row,) = ctx.changes.added["conversations"]
+    assert (row["id"], row["user_id"], row["title"]) == (ctx.body["id"], ctx.id(ctx.actor), "Pods")
+    assert ctx.body["title"] == "Pods" and recent(row["last_turn_at"])
+
+
+def g_conversations(ctx: Ctx) -> None:
+    unchanged(ctx)
+    assert [c["id"] for c in ctx.body["conversations"]] == _own_conversations(ctx)
+    assert _own_conversations(ctx) == [conversation_of(ctx.world, ctx.actor)]
+
+
+def g_conversation(ctx: Ctx) -> None:
+    unchanged(ctx)
+    version = ctx.world.docs[_CITES[ctx.actor]]["v1"]
+    title, body = doc_row(ctx, version)
+    assert (ctx.body["id"], ctx.body["left_out"]) == (conversation_of(ctx.world, ctx.actor), 0)
+    ((turn,),) = [ctx.body["turns"]]
+    ((passage,),) = [turn["passages"]]
+    assert (turn["question"], passage["version_id"], passage["title"]) == (
+        "Restart?",
+        version,
+        title,
+    )
+    assert passage["text"] == body[slice(*_SPAN)]  # re-read from the version body (KTD4)
+
+
+def g_delete_conversation(ctx: Ctx) -> None:
+    only(ctx.changes, "conversations")
+    own = conversation_of(ctx.world, ctx.actor)
+    assert [r["id"] for r in ctx.changes.removed["conversations"]] == [own]
+    assert ctx.changes.added["conversations"] == []
+    assert sql(ctx.pg, "SELECT count(*) FROM turns WHERE conversation_id = %s", own) == [(0,)]
