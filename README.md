@@ -2,7 +2,7 @@
 
 A governed knowledge store for AI agents. Teams add documents, an admin approves them, and agents retrieve only approved knowledge the person behind them is allowed to read, through MCP. Every decision is recorded in an audit trail.
 
-This repository holds the authorization foundation (workspaces, roles, groups, a document lifecycle with approval, policy-filtered search, a retrieval-only MCP endpoint and the audit trail) and the document ingestion built on it: file upload with extraction receipts, hybrid keyword and vector search with checkable evidence spans, and a query-time entity graph in the UI.
+This repository holds the authorization foundation (workspaces, roles, groups, a document lifecycle with approval, policy-filtered search, a retrieval-only MCP endpoint and the audit trail) and the document ingestion built on it: file upload with extraction receipts, hybrid keyword and vector search with checkable evidence spans, and a query-time entity graph in the UI. People sign in to an Overview of what they can read and what waits on them, where Ask quotes approved passages; a workspace can optionally connect its own AI provider so Ask also writes answers checked against those passages (see [Written answers in Ask](#written-answers-in-ask)).
 
 ## Quick start
 
@@ -26,7 +26,9 @@ Open <http://localhost:8000> and sign in as one of the seeded people (password `
 | `mei@lattice.demo` | member, group Platform |
 | `sam@lattice.demo` | member, group Payments |
 
-The seed creates an incident-support scenario: an architecture document, runbooks, an incident report, a runbook edit waiting for approval, a withdrawn runbook, a draft and a rejected draft. Sign in as Mei and as Sam and search for `checkout`: each sees a different set of documents.
+Signing in opens the workspace's Overview. The seed creates an incident-support scenario: an architecture document, runbooks, an incident report, a runbook edit waiting for approval, a withdrawn runbook, a draft and a rejected draft. Sign in as Mei and as Sam and search for `checkout`: each sees a different set of documents.
+
+The Docker stack lists a development-only fake AI provider. To try written answers, sign in as Olivia or Arjun, open **AI answers**, enter any key and save; Ask on the Overview then streams answers from the fake provider. `make dev` lists no provider unless you set the two AI variables described below.
 
 If port 5432 is taken, run `LATTICE_DB_PORT=55432 docker compose up --build`.
 
@@ -48,11 +50,11 @@ Everything belongs to a workspace, and nothing crosses a workspace boundary. One
 | Invite | Members or admins | Members | No |
 | Promote, demote, remove admins; transfer ownership | Yes | No | No |
 | Connect an AI provider, change the model, key or conversation retention | Yes | Yes | No (sees the provider and model) |
-| Ask with written answers; open and delete their own conversations | Own only | Own only | Own only |
+| Ask with written answers when AI is on; open and delete conversations | Own only | Own only | Own only |
 
 - **Lifecycle.** Every document version is immutable. A new document or an edit becomes a draft; an admin or the owner approves one exact version, which then serves until a newer version is approved. Withdrawal stops every version being served and is final.
 - **Retrieval is approved-only for everyone.** Drafts and withdrawn documents appear in the UI for their author and managers, never in search or MCP results.
-- **Agents act as their user.** An MCP client authenticates with a personal access token and gets exactly its user's live access. MCP offers two retrieval tools and nothing else.
+- **Agents act as their user.** An MCP client authenticates with a personal access token and gets exactly its user's live access. MCP offers two retrieval tools (`search_knowledge` and `get_evidence`) and nothing else; written answers are in the UI only.
 - **Changes apply on the next request.** Roles, groups, shares and lifecycle are read from the database on every request; nothing caches permissions.
 - **Denials look like missing.** A request for something you may not see gets the same "Not found or not permitted" as a request for something that does not exist. The reason goes to the audit trail.
 
@@ -60,17 +62,30 @@ Everything belongs to a workspace, and nothing crosses a workspace boundary. One
 
 Search cannot fetch the ten best matches and then drop the ones you may not read: a restricted-heavy corpus would return two results instead of ten, and the gaps would hint at what is hidden. So each read rule is written once as named terms. Each term evaluates in Python for a single decision and compiles to SQL, and the SQL form sits in the search query's `WHERE` clause before ranking and `LIMIT`.
 
+## Written answers in Ask
+
+Optional, and off until an owner or admin connects a provider for the workspace.
+
+- **The operator lists the providers.** `LATTICE_AI_PROVIDERS` is a JSON array of OpenAI-compatible endpoints (id, label, HTTPS `base_url`, `bearer` or `api-key` auth, and models with their context and output limits). Owners and admins choose one of these and enter the workspace's own key; nobody can enter a URL. See [`.env.example`](.env.example).
+- **Keys are encrypted and write-only.** Keys are sealed with AES-GCM under the master keys in `LATTICE_AI_KEY_ENCRYPTION_KEYS` (base64 32-byte keys, newest first), bound to their workspace and provider, and never returned, logged or audited. The app refuses to start when providers are listed without a valid master key, and refuses the published development key once development cookies are off. To rotate, list a new key first, have each workspace re-save its key, then remove the old one.
+- **What reaches the provider.** The question, the approved passages the asker's own search returns, and earlier turns of the same conversation, condensed into a summary once it grows long (only text the asker can still read, and only sentences that passed the check). Redirects are never followed.
+- **Every sentence is checked.** A sentence must cite a passage it was sent and share most of its wording with it, with the same negations. Sentences that fail are shown marked "Not supported by your documents"; an answer with none that pass reads "Your documents don't cover this". Before each sentence goes out, the asker's access to every version the prompt used is re-checked, and a turn whose document is withdrawn or unshared mid-answer is not saved.
+- **Conversations are private.** Only the person who asked can open one, whatever anyone else's role. They are kept 1 to 365 days (default 30) after their last question, set by owners and admins; an hourly sweep deletes expired ones, and removing a member deletes theirs. When a cited version stops serving, the purge deletes every saved turn built on it, and the asker later sees how many turns were left out.
+- **Two audit rows per turn.** The question, the versions sent, the provider and the model are recorded before anything leaves the server; the outcome follows. Neither row contains the answer.
+
 ## How it is verified
 
 Run `cd backend && uv run pytest` (Docker must be running: the tests start PostgreSQL 18 with Testcontainers).
 
 - **Equivalence property test** ([`test_policy_properties.py`](backend/tests/test_policy_properties.py)). A Hypothesis state machine drives the real API through document, sharing, group, role and membership changes across two workspaces. After every step it checks, for every person, that an independent reference model, the SQL read predicates, the single-item decision, UI search and MCP search all agree. A second test breaks one rule and confirms the property catches it.
 - **Endpoint matrix** ([`test_endpoint_matrix.py`](backend/tests/test_endpoint_matrix.py), [`test_endpoint_global.py`](backend/tests/test_endpoint_global.py)). Every REST endpoint is called by the owner, an admin, an author, a reader, another member, an outsider and an anonymous caller in a fresh, known workspace. Each call is grounded three ways: the status against the role table, the response body against the database, and the exact rows it changed (a refusal changes nothing), plus the audit row it wrote. The MCP tools are checked the same way for every member. A guard test fails when a new route has no grounded test.
-- **Acceptance examples.** Every example in the [plan](docs/plans/2026-10-15-1207-feat-workspace-authorization-plan.md) (AE1–AE11) has a test that cites it.
+- **Acceptance examples.** Every example in the [authorization plan](docs/plans/2026-10-15-1207-feat-workspace-authorization-plan.md) (AE1–AE11) and the [written-answers plan](docs/plans/2026-10-20-1606-feat-ai-answers-in-ask-plan.md) (AE1–AE8) has a test that cites it.
+- **Answer turns.** A fake provider drives the full streaming flow: mid-answer withdrawal, two tabs racing one conversation, a dropped connection, a rejected key, and exactly one outcome audit row per turn. A hand-labelled sentence set fixes the citation-check threshold; no test calls a real provider.
 - **MCP over real HTTP.** Token checks, the closed tool list, ignored identity arguments, evidence lookups and cross-workspace isolation are tested against a running server, not an in-memory client.
-- **Database guarantees.** Schema tests run as the runtime role and confirm it cannot update, delete or truncate audit rows, cannot change a document version, and owns nothing.
+- **Database guarantees.** Schema tests run as the runtime role and confirm it cannot update, delete or truncate audit rows, cannot change a document version or a saved answer, and owns nothing. Every table derived from document text must be registered with the purge, and a database stopped at an earlier migration must upgrade to the same schema.
+- **Browser tests.** Playwright tests in [`frontend/e2e`](frontend/e2e/app.spec.ts) cover every page for each seeded role with no console or CSP errors, the document lifecycle, uploads, and Ask with and without the fake provider. Run them with `make e2e` against a running, seeded stack; CI does not run them.
 
-CI runs the backend tests, the property suite and the frontend build and tests on every pull request.
+CI runs on every pull request and every push to `main`: ruff, the backend tests, the benchmark gates, the property suite, and the frontend lint, build and tests.
 
 ## Security notes and limits
 
@@ -78,6 +93,8 @@ CI runs the backend tests, the property suite and the frontend build and tests o
 - **The audit trail is append-only to the application.** The runtime database role can only insert and read audit rows, and triggers reject changes. A database superuser can still alter it; it is not tamper-proof.
 - **Revocation stops future access only.** Text an agent already retrieved cannot be recalled; the audit trail records what each agent received.
 - **Approval is a human gate, and humans miss things.** Reviewers see a raw-text diff with invisible format characters shown as escapes, but a determined author can still hide intent in plain text.
+- **Written answers send text to a third party.** With AI on, passages the asker can read leave the server for the workspace's provider. The citation check compares wording, so it catches inverted and invented claims but not a changed number or a reworded meaning. Provider spend has no per-member limit yet.
+- **Development defaults are public.** `compose.yaml` falls back to a published pepper and a published AI master key, both refused once development cookies are off; set real ones in `.env` for anything shared.
 - **Not built for a public deployment yet:** no rate limiting on sign-in or token use, no password reset (there is no email delivery), no audit retention policy, and the database passwords in `db/init/01-roles.sql` and `compose.yaml` are local development defaults.
 
 ## Implemented, verified, deferred
@@ -89,7 +106,8 @@ CI runs the backend tests, the property suite and the frontend build and tests o
 | Policy-filtered full-text search (PostgreSQL) | Implemented and tested, including hidden-top-match ordering |
 | MCP endpoint with personal access tokens | Implemented and tested over HTTP; Claude Code connection checked by hand |
 | Audit trail, fail-closed | Implemented and tested |
-| Web UI for every flow | Implemented; component tests plus a manual end-to-end check |
+| Web UI for every flow | Implemented; component tests and Playwright end-to-end tests |
+| Overview on sign-in: what you can read, what waits on you, Ask and your last 10 queries | Implemented and tested |
 | Upload of Markdown, text, HTML, text-layer PDF and DOCX into drafts (single files, several files, folders or drag and drop), with extraction receipts that flagged uploads need acknowledged | Implemented and tested |
 | Derivation ledger (chunks and embeddings per version); approve waits until a draft is ready | Implemented and tested |
 | Purge of derivatives when a version stops serving, with a receipt in the audit trail | Implemented and tested |
@@ -124,7 +142,7 @@ npm run build
 npm run e2e    # browser tests against the running stack (compose up + seed)
 ```
 
-Run the API locally against the Compose database with `LATTICE_INSECURE_DEV_COOKIES=true uv run uvicorn --factory app.main:create_app --reload` after `uv run alembic upgrade head`. Without a private `LATTICE_SECRET_PEPPER`, the app starts only in this local development mode; settings are read from `LATTICE_*` environment variables (see [`backend/app/config.py`](backend/app/config.py)).
+Run the API locally against the Compose database with `LATTICE_INSECURE_DEV_COOKIES=true uv run uvicorn --factory app.main:create_app --reload` after `uv run alembic upgrade head`. Without a private `LATTICE_SECRET_PEPPER`, the app starts only in this local development mode. Settings are read from `LATTICE_*` environment variables or a `.env` file in the directory the API starts in (see [`backend/app/config.py`](backend/app/config.py)): Docker Compose takes them from the repository's `.env`, while `make dev` and a local uvicorn read `backend/.env`. [`.env.example`](.env.example) lists them.
 
 The database image is `pgvector/pgvector:pg18`. A `pgdata` volume created before pgvector has no `vector` extension and the migration stops with a message: run `docker compose down -v` to start fresh, or run `CREATE EXTENSION vector;` once in the `lattice` database as the `postgres` superuser.
 
@@ -142,11 +160,17 @@ backend/app/services/      document lifecycle, search, membership
   graph.py                 query-time entity graph
 backend/app/ingest/        file sniffing, per-format extractors, extraction receipts
 backend/app/derived.py     derived tables and purge receipts
+backend/app/ai/            written answers: provider seam, key encryption, citation check,
+                           memory and currency guard, streaming turns, retention sweep
+backend/app/routers/ai.py  AI settings API
+backend/app/routers/conversations.py  conversations and the streaming turn route
+backend/app/migrations/    Alembic migrations (forward-only)
 backend/app/embedding.py   the embedder seam (fastembed, or a fake for tests)
 backend/app/routers/entities.py  entity registry API
 backend/app/mcp_server.py  MCP endpoint and token verification
 backend/app/seed.py        demo data
 frontend/src/              Vue UI (design system: DESIGN.md)
 db/init/01-roles.sql       database roles (owner for migrations, app for runtime)
-docs/plans/                requirements and implementation plan
+docs/plans/                requirements and implementation plans
+docs/solutions/            recorded learnings
 ```
