@@ -196,15 +196,17 @@ async def test_accept_invite(settings, pg, app):
         for actor, sent, status in (
             ("outsider", token[:-4] + "AAAA", 404),
             ("anon", token, 401),
-            ("reader", token, 404),
+            ("reader", token, 200),  # already a member: sent on to the workspace (R6)
         ):
             done = measure()
             response = await world.clients[actor].post("/api/invites/accept", json={"token": sent})
             assert response.status_code == status
+            if actor == "reader":
+                assert response.json()["already_member"] is True
             changes, audit_from = done()
             unchanged(ctx(world, actor, changes, pg))
             audit = audit_rows(pg, world.ws, audit_from)
-            if actor == "reader":  # a genuine invite holder's refusal is traceable (R6)
+            if actor == "reader":  # a genuine invite holder's attempt is traceable (R6)
                 ((row,),) = [audit]
                 assert (row["action"], row["outcome"], row["rule_id"]) == (
                     "accept_invite",

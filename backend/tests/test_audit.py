@@ -17,6 +17,7 @@ from tests.helpers import (
     add_document,
     api_client,
     create_workspace,
+    join,
     seed_workspace,
     sign_up_and_in,
     signed_in,
@@ -145,3 +146,18 @@ async def test_managers_see_system_purge_receipts_with_no_actor(settings):
         doc["id"],
     )
     assert event["detail"]["removed"] == {"derivations": 1, "chunks": 1, "intake_payloads": 0}
+
+
+async def test_the_trail_keeps_the_name_of_someone_who_has_left(settings):
+    """People who were removed still appear by name, marked as no longer members (#16)."""
+    async with signed_in(settings) as owner, signed_in(settings) as leaver:
+        ws = await create_workspace(owner)
+        await join(owner, ws, leaver)
+        await add_document(leaver, ws, title="Notes", body="Left behind.")
+        assert (
+            await owner.delete(f"/api/workspaces/{ws}/members/{leaver.user_id}")
+        ).status_code == 204
+        response = (await owner.get(f"/api/workspaces/{ws}/audit")).json()
+        [actor] = [a for a in response["actors"] if a["user_id"] == leaver.user_id]
+        assert actor["current"] is False
+        assert actor["name"]

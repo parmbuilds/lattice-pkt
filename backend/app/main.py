@@ -5,6 +5,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import RedirectResponse
@@ -13,6 +16,7 @@ from starlette.staticfiles import StaticFiles
 from app.ai import keys as ai_keys
 from app.ai import retention
 from app.ai.provider import make_http_client
+from app.audit import NOT_FOUND_DETAIL
 from app.auth import GuardMiddleware
 from app.config import DEV_PEPPER, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
@@ -120,6 +124,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async with request.app.state.engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         return {"status": "ok"}
+
+    @app.exception_handler(RequestValidationError)
+    async def malformed_id_is_not_found(request: Request, error: RequestValidationError):
+        """A malformed id in a detail URL gets the same answer as an unknown one (R29)."""
+        if request.method == "GET" and all(e["loc"][:1] == ("path",) for e in error.errors()):
+            return JSONResponse({"detail": NOT_FOUND_DETAIL}, status_code=404)
+        return await request_validation_exception_handler(request, error)
 
     app.mount("/", root)  # last: API routes take precedence
     return app

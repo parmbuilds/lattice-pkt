@@ -240,3 +240,16 @@ async def test_the_search_audit_row_lists_the_returned_spans(settings):
         [r["version_id"], s["start"], s["end"]] for r in results for s in r["spans"]
     ]
     assert all(r["spans"] for r in results)
+
+
+def test_gibberish_is_recognised_but_real_words_and_other_scripts_are_not():
+    """Random letters skip the meaning branch (#8); words, digits and other scripts keep it."""
+    from app.services.search import _is_gibberish
+
+    assert _is_gibberish("zxqvbnmwq")
+    assert _is_gibberish("Zxqv, bnmwq!")
+    assert not _is_gibberish("checkout architecture")
+    assert not _is_gibberish("rhythm")
+    assert not _is_gibberish("2fa reset")
+    assert not _is_gibberish("日本語")
+    assert not _is_gibberish("   ")  # no words at all: the existing path decides

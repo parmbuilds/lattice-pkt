@@ -121,7 +121,9 @@ async def test_withdrawing_purges_every_version_and_says_bodies_are_retained(set
         doc = await _upload(owner, ws)
         v1 = doc["pending_version_id"]
         await approve_flagged(owner, ws, doc["id"], v1)
-        v2 = (await _upload(owner, ws, document_id=doc["id"]))["pending_version_id"]
+        # A different revision: identical bytes are no longer a second version (R5).
+        revised = FLAGGED_MD + b"A second revision.\n"
+        v2 = (await _upload(owner, ws, data=revised, document_id=doc["id"]))["pending_version_id"]
         assert (await owner.post(_docs(ws, doc["id"], "/withdraw"))).status_code == 204
     for version in (v1, v2):
         assert _derived(pg, version) == {"derivations": 0, "chunks": 0, "intake_payloads": 0}

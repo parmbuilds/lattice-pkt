@@ -121,7 +121,7 @@ async def test_an_invite_stops_working_when_its_creator_loses_the_authority(sett
         ).status_code == 404
 
 
-async def test_an_existing_member_cannot_use_an_invite_and_it_stays_valid(settings):
+async def test_an_existing_member_is_sent_to_the_workspace_and_the_invite_stays_valid(settings):
     async with (
         signed_in(settings) as owner,
         signed_in(settings) as member,
@@ -130,8 +130,10 @@ async def test_an_existing_member_cannot_use_an_invite_and_it_stays_valid(settin
         ws = await create_workspace(owner)
         await join(owner, ws, member)
         token = await invite(owner, ws, "member")
-        assert (await member.post("/api/invites/accept", json={"token": token})).status_code == 404
-        assert (await owner.post("/api/invites/accept", json={"token": token})).status_code == 404
+        for existing in (member, owner):  # not a refusal: they already belong here
+            response = await existing.post("/api/invites/accept", json={"token": token})
+            assert response.status_code == 200, response.text
+            assert response.json()["already_member"] is True
         assert (
             await newcomer.post("/api/invites/accept", json={"token": token})
         ).status_code == 200

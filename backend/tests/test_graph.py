@@ -154,8 +154,53 @@ async def test_matching_is_literal_case_insensitive_on_word_boundaries(settings)
         odd = await _entity(owner, ws, "odd", ["a.b(c"])
         (got,) = (await _detail(owner, ws, gateway))[1]["mentions"]
         assert got["document_id"] == doc["id"]
-        assert [body[s["start"] : s["end"]] for s in got["spans"]] == ["Gateway", "GATEWAY"]
+        [span] = got["spans"]  # both matches are close enough to share one passage
+        assert [span["snippet"][s:e] for s, e in span["marks"]] == ["Gateway", "GATEWAY"]
         (got,) = (await _detail(owner, ws, odd))[1]["mentions"]
-        spans = got["spans"]
-        assert [body[s["start"] : s["end"]] for s in spans] == ["a.b(c"]
-        assert body[spans[0]["start"] : spans[0]["end"]] in spans[0]["snippet"]
+        [span] = got["spans"]
+        assert [span["snippet"][s:e] for s, e in span["marks"]] == ["a.b(c"]
+
+
+async def test_passages_are_whole_words_one_per_run_and_carry_marks(settings):
+    """Two mentions in one sentence give one passage, cut at word edges, matches marked (#9)."""
+    body = (
+        "Opening notes about the rota and the room booking. " * 3
+        + "The payments circuit breaker trips, and the payments circuit breaker resets."
+        + " Closing notes about staffing and the quarterly review. " * 4
+    )
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        await _doc(owner, ws, "Runbook", body)
+        breaker = await _entity(owner, ws, "circuit breaker")
+        status, detail = await _detail(owner, ws, breaker)
+        assert status == 200
+        [span] = detail["mentions"][0]["spans"]
+        snippet = span["snippet"]
+        assert snippet.count("circuit breaker") == 2
+        for start, end in span["marks"]:
+            assert snippet[start:end] == "circuit breaker"
+        core = snippet.strip("…")
+        at = body.find(core)
+        assert at >= 0 and (at == 0 or body[at - 1].isspace())
+        end = at + len(core)
+        assert end == len(body) or body[end].isspace()
+
+
+async def test_a_name_or_alias_cannot_repeat_another_entitys_name_or_alias(settings):
+    """Names and aliases share one namespace per workspace, ignoring case (#21)."""
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        await _entity(owner, ws, "checkout", ["cart"])
+        clash = [
+            {"name": "ping", "aliases": ["Checkout"]},
+            {"name": "pay-gw", "aliases": ["cart"]},
+            {"name": "x", "aliases": ["X"]},
+        ]
+        for body in clash:
+            response = await owner.post(_url(ws), json=body)
+            assert response.status_code == 409, body
+        ping = (await owner.post(_url(ws), json={"name": "ping", "aliases": ["ping-svc"]})).json()
+        renamed = await owner.patch(_url(ws, f"/{ping['id']}"), json={"name": "checkout"})
+        assert renamed.status_code == 409
+        kept = await owner.patch(_url(ws, f"/{ping['id']}"), json={"aliases": ["ping-svc"]})
+        assert kept.status_code == 200
