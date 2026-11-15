@@ -19,9 +19,15 @@ const addable = computed(() => {
   return props.people.filter((p) => !inGroup.has(p.user_id))
 })
 
-const add = () => adding.value && props.act(() => api(`${path.value}/members/${adding.value}`, 'PUT'), 'Member added to the group.')
-const removeMember = (m: { user_id: string; name: string }) =>
-  props.act(() => api(`${path.value}/members/${m.user_id}`, 'DELETE'), `${m.name} removed from the group.`)
+// The selection is cleared after each change, so a removed person is not still picked for the next click.
+const add = async () => {
+  if (adding.value && (await props.act(() => api(`${path.value}/members/${adding.value}`, 'PUT'), 'Member added to the group.')))
+    adding.value = ''
+}
+const removeMember = async (m: { user_id: string; name: string }) => {
+  if (await props.act(() => api(`${path.value}/members/${m.user_id}`, 'DELETE'), `${m.name} removed from the group.`))
+    adding.value = ''
+}
 const save = () => props.act(() => api(path.value, 'PATCH', { name: rename.value }), 'Group renamed.')
 const remove = () =>
   window.confirm(`Delete group "${props.group.name}"? Every document shared with it loses that share.`) &&
@@ -47,7 +53,7 @@ const remove = () =>
       <form class="flex items-end gap-2" @submit.prevent="add">
         <label class="field flex-1">
           Add person
-          <select v-model="adding" class="input">
+          <select v-model="adding" class="input" required>
             <option value="">Choose…</option>
             <option v-for="p in addable" :key="p.user_id" :value="p.user_id">{{ p.name }}</option>
           </select>

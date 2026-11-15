@@ -8,6 +8,7 @@ import DocumentDetail from './DocumentDetail.vue'
 import Documents from './Documents.vue'
 import Entities from './Entities.vue'
 import Groups from './Groups.vue'
+import Members from './Members.vue'
 import Overview from './Overview.vue'
 import Search from './Search.vue'
 import Tokens from './Tokens.vue'
@@ -305,7 +306,8 @@ describe('ReviewCard', () => {
     })
     const w = await mountReview()
     expect(document.body.textContent).toContain('Needs acknowledgement')
-    expect(document.body.textContent).toContain('pdf_invisible_text_not_checked')
+    expect(document.body.textContent).toContain('Hidden text in PDFs is not checked')
+    expect(document.body.textContent).not.toContain('pdf_invisible_text_not_checked')
     expect(approveButton().disabled).toBe(true)
     await w.find('input[type="checkbox"]').setValue(true)
     expect(approveButton().disabled).toBe(false)
@@ -448,11 +450,16 @@ describe('Entities page', () => {
             document_id: 'd1',
             title: 'Checkout guide',
             spans: [
-              { start: 0, end: 12, term: 'Payments API', snippet: 'Payments API retries twice.' },
-              { start: 40, end: 46, term: 'payapi', snippet: 'payapi times out after 5s.' },
+              { start: 0, end: 12, term: 'Payments API', snippet: 'Payments API retries twice.', marks: [[0, 12]] },
+              { start: 40, end: 46, term: 'payapi', snippet: 'payapi times out after 5s.', marks: [[0, 6]] },
             ],
           },
-          { version_id: 'v2', document_id: 'd2', title: 'Incident 42', spans: [{ start: 3, end: 9, term: 'payapi', snippet: EVIL }] },
+          {
+            version_id: 'v2',
+            document_id: 'd2',
+            title: 'Incident 42',
+            spans: [{ start: 3, end: 9, term: 'payapi', snippet: EVIL, marks: [] }],
+          },
         ],
         co_mentions: [{ id: 'e2', name: 'Ledger' }],
       },
@@ -463,6 +470,7 @@ describe('Entities page', () => {
     expect(rows[0].querySelector('a')!.getAttribute('href')).toBe('/w/ws1/documents/d1')
     expect(rows[0].textContent).toContain('Payments API retries twice.')
     expect(rows[0].textContent).toContain('payapi times out after 5s.')
+    expect(rows[0].querySelector('mark')!.textContent).toBe('Payments API')
     expect(rows[1].textContent).toContain(EVIL)
     expect(document.querySelector('img')).toBeNull()
     const co = [...document.querySelectorAll('a')].find((a) => a.textContent === 'Ledger')!
@@ -557,3 +565,78 @@ describe('Overview page', () => {
     expect(document.querySelector('[aria-label="Ask again: latency"]')!.textContent).toContain('1 match')
   })
 })
+
+describe('Document history and preparation', () => {
+  const detail = (over: Record<string, unknown> = {}) => ({ ...draft, body: 'x', shown_version_id: 'v1', ...over })
+  const stateColumn = () => [...document.querySelectorAll('table.register tbody tr')].map((r) => r.querySelector('td:nth-child(3)')!.textContent!.trim())
+
+  it('labels each revision by its own decision, not by the last decision', async () => {
+    mockApi({
+      [`GET ${BASE}/d1`]: detail({
+        serving_version_id: 'v3',
+        pending_version_id: null,
+        versions: [
+          { id: 'v1', title: 'Runbook', created_at: '2026-01-01T00:00:00Z', decision: 'approved' },
+          { id: 'v2', title: 'Runbook', created_at: '2026-01-02T00:00:00Z', decision: 'discarded' },
+          { id: 'v3', title: 'Runbook', created_at: '2026-01-03T00:00:00Z', decision: 'approved' },
+          { id: 'v4', title: 'Runbook', created_at: '2026-01-04T00:00:00Z', decision: null },
+        ],
+      }),
+    })
+    await renderPage('/w/ws1/documents/d1', DOC_DETAIL, DocumentDetail, 'member')
+    expect(stateColumn()).toEqual(['Not approved', 'Serving', 'Discarded', 'Superseded'])
+  })
+
+  it('checks again while the shown version is preparing, then stops', async () => {
+    let calls = 0
+    mockApi({
+      [`GET ${BASE}/d1`]: () => {
+        calls++
+        return detail({ derivations: { v1: { status: calls < 2 ? 'pending' : 'ready', error: null } } })
+      },
+    })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await renderPage('/w/ws1/documents/d1', DOC_DETAIL, DocumentDetail, 'member')
+      expect(document.body.textContent).toContain('Preparing')
+      await vi.advanceTimersByTimeAsync(2000) // no reload from the user: the page checks by itself
+      await flushPromises()
+      expect(document.body.textContent).toContain('Ready')
+      await vi.advanceTimersByTimeAsync(10000)
+      await flushPromises()
+      expect(calls).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says nothing is approved yet instead of showing an approved version', async () => {
+    mockApi({ [`GET ${BASE}/d1`]: detail({ pending_version_id: null, serving_version_id: null }) })
+    await renderPage('/w/ws1/documents/d1', DOC_DETAIL, DocumentDetail, 'member')
+    expect(document.body.textContent).toContain('Showing a version that was never approved.')
+    expect(document.body.textContent).not.toContain('Showing the approved version.')
+  })
+
+  it('says so when the uploaded file is already the current version', async () => {
+    mockApi({
+      [`GET ${BASE}/d1`]: detail({ author_id: 'u1' }),
+      [`POST ${BASE}/upload`]: { id: 'd1', created: false, pending_version_id: 'v1' },
+    })
+    const w = await renderPage('/w/ws1/documents/d1', DOC_DETAIL, DocumentDetail, 'member')
+    await fileInput(w, new File(['same'], 'a.md'))
+    await w.findAll('form').find((f) => f.text().includes('Upload new version'))!.trigger('submit')
+    await flushPromises()
+    expect(document.body.textContent).toContain('That file is already the current version; nothing changed.')
+  })
+})
+
+describe('Members page', () => {
+  it('shows a member only the denial, with no invite controls', async () => {
+    const fetchMock = mockApi({})
+    await renderPage('/w/ws1/members', '/w/:workspaceId/members', Members, 'member')
+    expect(document.body.textContent).toContain('Not found or not permitted.')
+    expect(document.body.textContent).not.toContain('Invite someone')
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes('/members'))).toBe(false)
+  })
+})
+

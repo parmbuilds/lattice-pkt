@@ -30,6 +30,27 @@ const props = defineProps<{
   decide: (action: () => Promise<unknown>, done: string) => Promise<void>
 }>()
 
+// Plain words for the receipt codes the server records (backend/app/ingest). Unknown codes show as they are.
+const FLAGS: Record<string, string> = {
+  tracked_insertion: 'Tracked insertion',
+  tracked_deletion: 'Tracked deletion',
+  tracked_move: 'Tracked move',
+  hidden_run: 'Hidden text',
+  white_text: 'Text in white',
+  hidden_element: 'Hidden HTML element',
+  visibility_ambiguous: 'Visibility could not be determined',
+  unaccounted_content: 'Content missing from the extracted text',
+  dropped_table: 'Table not extracted',
+  empty_page: 'Page with no text',
+  invisible_chars: 'Invisible characters',
+  unicode_escape: 'Unicode escapes',
+}
+const NOTES: Record<string, string> = {
+  pdf_invisible_text_not_checked: 'Hidden text in PDFs is not checked, so the draft may leave some of the file out.',
+}
+const flagText = (kind: string) => FLAGS[kind] ?? kind
+const noteText = (note: string) => NOTES[note] ?? note
+
 const path = computed(() => `${props.base}/documents/${props.doc.id}`)
 const review = useLoad<Review>(() => `${path.value}/review`)
 // The worker readies drafts in the background: check again until this one is ready (R11),
@@ -64,7 +85,7 @@ function approve(r: Review) {
 function reject(r: Review) {
   return props.decide(
     () => api(`${path.value}/reject`, 'POST', { version_id: r.pending_version_id, reason: reason.value || null }),
-    `Rejected "${r.title}"; the approved version keeps serving.`,
+    `Rejected "${r.title}"; ${r.serving_version_id ? 'the approved version keeps serving.' : 'nothing is served yet.'}`,
   )
 }
 </script>
@@ -97,10 +118,10 @@ function reject(r: Review) {
         </span>
       </p>
       <ul v-if="review.data.receipt.flags.length" class="list-disc pl-5 text-sm">
-        <li v-for="(f, i) in review.data.receipt.flags" :key="i">{{ f.kind }} at {{ f.location }} ({{ f.count }})</li>
+        <li v-for="(f, i) in review.data.receipt.flags" :key="i">{{ flagText(f.kind) }} at {{ f.location }} ({{ f.count }})</li>
       </ul>
       <ul v-if="review.data.receipt.notes?.length" class="text-sm text-muted">
-        <li v-for="n in review.data.receipt.notes" :key="n">Note: {{ n }}</li>
+        <li v-for="n in review.data.receipt.notes" :key="n">{{ noteText(n) }}</li>
       </ul>
       <div v-if="review.data.receipt.hidden_excerpts.length">
         <h3 class="caps text-graphite">Hidden content left out of the draft</h3>

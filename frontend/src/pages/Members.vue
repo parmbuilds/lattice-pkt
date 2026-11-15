@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { api, ApiError, errorText } from '../api'
+import { api, ApiError, errorText, NOT_FOUND } from '../api'
 import LoadState from '../components/LoadState.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusMessage from '../components/StatusMessage.vue'
@@ -10,11 +10,13 @@ type Member = { user_id: string; name: string; email: string; role: Role }
 type Invite = { id: string; role: Role; prefix: string; inviter_id: string; expires_at: string }
 
 const w = useWorkspace()
-const members = useLoad<{ members: Member[] }>(() => `${w.base}/members`)
-const invites = useLoad<{ invites: Invite[] }>(() => `${w.base}/invites`)
+// Only owners and admins may see or change members; everyone else gets the same denial as any missing page.
+const members = useLoad<{ members: Member[] }>(() => (w.manager ? `${w.base}/members` : null))
+const invites = useLoad<{ invites: Invite[] }>(() => (w.manager ? `${w.base}/invites` : null))
 const { message, run } = useAction()
 const inviteRole = ref<Role>('member')
 const inviteUrl = ref('')
+const inviteId = ref('') // the invite behind inviteUrl, so cancelling it clears the link
 
 async function act(action: () => Promise<unknown>, done: string) {
   if (await run(action, done)) {
@@ -33,9 +35,12 @@ const changeRole = (m: Member, next: Role) =>
 
 async function createInvite() {
   inviteUrl.value = ''
+  inviteId.value = ''
   await run(
     async () => {
-      inviteUrl.value = (await api<{ invite_url: string }>(`${w.base}/invites`, 'POST', { role: inviteRole.value })).invite_url
+      const invite = await api<{ id: string; invite_url: string }>(`${w.base}/invites`, 'POST', { role: inviteRole.value })
+      inviteId.value = invite.id
+      inviteUrl.value = invite.invite_url
       invites.reload()
     },
     'Invite created. Copy the link and send it to the person.',
@@ -44,14 +49,21 @@ async function createInvite() {
   )
 }
 const copyInvite = () => navigator.clipboard?.writeText(inviteUrl.value)
-const cancelInvite = (i: Invite) => run(() => api(`${w.base}/invites/${i.id}`, 'DELETE'), 'Invite cancelled.').then(invites.reload)
+async function cancelInvite(i: Invite) {
+  if (await run(() => api(`${w.base}/invites/${i.id}`, 'DELETE'), 'Invite cancelled.') && i.id === inviteId.value) {
+    inviteUrl.value = ''
+    inviteId.value = ''
+  }
+  invites.reload()
+}
 </script>
 
 <template>
   <PageHeader title="Members" lede="Roles apply on the next request; nothing caches permissions." />
-  <StatusMessage :text="message" />
+  <StatusMessage v-if="!w.manager" :text="NOT_FOUND" />
+  <StatusMessage v-else :text="message" />
 
-  <div class="mt-4 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+  <div v-if="w.manager" class="mt-4 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
     <section aria-label="Members" class="min-w-0">
       <LoadState :load="members" :empty="!members.data?.members.length" empty-text="No members." />
       <div v-if="members.data?.members.length" class="sheet overflow-x-auto">

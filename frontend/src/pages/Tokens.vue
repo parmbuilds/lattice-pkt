@@ -24,6 +24,7 @@ const name = ref('')
 const password = ref('')
 // The secret lives only here, from the create response; the list never carries it.
 const secret = ref('')
+const secretId = ref('') // the token the secret belongs to, so revoking it clears the banner
 const endpoint = `${window.location.origin}/mcp`
 const config = JSON.stringify(
   { mcpServers: { lattice: { type: 'http', url: endpoint, headers: { Authorization: 'Bearer <token>' } } } },
@@ -34,8 +35,11 @@ const expired = (t: Token) => new Date(t.expires_at).getTime() < Date.now()
 
 async function create() {
   secret.value = ''
+  secretId.value = ''
   const ok = await run(async () => {
-    secret.value = (await api<{ token: string }>(`${w.base}/tokens`, 'POST', { name: name.value, password: password.value })).token
+    const created = await api<{ id: string; token: string }>(`${w.base}/tokens`, 'POST', { name: name.value, password: password.value })
+    secret.value = created.token
+    secretId.value = created.id
   })
   password.value = ''
   if (ok) {
@@ -48,7 +52,13 @@ const copy = () =>
     () => (message.value = 'Token copied.'),
     () => (message.value = 'Copy failed; select the token and copy it by hand.'),
   )
-const revoke = (t: Token) => run(() => api(`${w.base}/tokens/${t.id}`, 'DELETE'), 'Token revoked.').then(tokens.reload)
+async function revoke(t: Token) {
+  if (await run(() => api(`${w.base}/tokens/${t.id}`, 'DELETE'), 'Token revoked.') && t.id === secretId.value) {
+    secret.value = ''
+    secretId.value = ''
+  }
+  tokens.reload()
+}
 </script>
 
 <template>
