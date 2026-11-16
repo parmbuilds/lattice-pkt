@@ -22,6 +22,22 @@ from app.services.documents import MAX_TITLE
 
 UPLOAD_PATH = re.compile(r"/api/workspaces/[^/]+/documents/upload")
 
+# What a person can act on for each refusal code. The code itself stays on the intake row.
+REFUSAL_TEXT = {
+    "encrypted": "This PDF is password-protected.",
+    "unsupported": "Only .md, .txt, .html, .pdf and .docx files are accepted.",
+    "unsafe_zip": "This Word file contains an unsafe archive entry, so it was refused.",
+    "zip_limit": "This Word file is too large or too deeply nested to read safely.",
+    "malformed": "This file is damaged or could not be read.",
+    "encoding": "This text file is not valid UTF-8 text.",
+    "page_limit": "This PDF has too many pages.",
+    "no_text": "No readable text was found in this file.",
+    "body_too_long": "The text in this file is too long to store.",
+    "body_too_diverse": "The text in this file is too unusual to index.",
+    "timeout": "Reading this file took too long.",
+    "memory_limit": "Reading this file needed too much memory.",
+}
+
 RECEIPT_NOT_ACKNOWLEDGED = HTTPException(
     409, "This draft's extraction receipt has flags. Review it and acknowledge that receipt."
 )
@@ -114,6 +130,28 @@ async def duplicate_of(db: AsyncSession, subject: Subject, source_sha256: str) -
     )
 
 
+async def same_source_in(db: AsyncSession, doc: Document, source_sha256: str) -> bool:
+    """Whether one of the document's current versions came from these exact bytes.
+
+    The advisory lock holds until commit, so two identical uploads cannot both add a version.
+    """
+    key = f"document:{doc.id}:{source_sha256}"
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key})
+    current = [v for v in (doc.pending_version_id, doc.serving_version_id) if v]
+    return (
+        await db.scalar(
+            select(Intake.id)
+            .where(
+                Intake.document_id == doc.id,
+                Intake.source_sha256 == source_sha256,
+                Intake.version_id.in_(current),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
 async def titled(db: AsyncSession, subject: Subject, title: str) -> Document | None:
     """The uploader's live document with this current title, ignoring case and edge spaces."""
     return await db.scalar(
@@ -143,7 +181,8 @@ async def rejected(
         )
     )
     await db.flush()
-    return CommitThenRaise(HTTPException(status, reason[:MAX_TEXT]))
+    message = REFUSAL_TEXT.get(reason, "This file could not be read.")
+    return CommitThenRaise(HTTPException(status, message))
 
 
 async def accepted(

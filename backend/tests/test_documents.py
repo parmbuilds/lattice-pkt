@@ -336,3 +336,42 @@ async def test_a_body_too_diverse_for_its_search_index_is_refused_and_stores_not
                 "SELECT count(*) FROM documents WHERE workspace_id = %s", (ws,)
             ).fetchone()[0]
         assert stored == 0
+
+
+async def test_a_withdrawn_document_reports_no_derivation_status(settings):
+    """Withdrawal purges the derivation rows; the page must not read that as "preparing" (#5)."""
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        doc = await add_document(owner, ws, title="Rota", body="Who is on call.")
+        await approve(owner, ws, doc)
+        assert (await owner.post(f"{_docs_url(ws, doc['id'])}/withdraw")).status_code == 204
+        detail = (await owner.get(_docs_url(ws, doc["id"]))).json()
+        assert detail["withdrawn"] is True
+        assert detail["derivations"] == {}
+
+
+async def test_each_version_reports_its_own_decision(settings):
+    """A discarded draft is not "Superseded" just because a later version was approved (#13)."""
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        doc = await add_document(owner, ws, title="Rota", body="First.")
+        await approve(owner, ws, doc)
+        edit = await owner.put(_docs_url(ws, doc["id"]), json={"title": "Rota", "body": "Second."})
+        discarded = edit.json()["pending_version_id"]
+        await owner.post(f"{_docs_url(ws, doc['id'])}/discard", json={"version_id": discarded})
+        edit = await owner.put(_docs_url(ws, doc["id"]), json={"title": "Rota", "body": "Third."})
+        await approve(owner, ws, edit.json())
+        versions = (await owner.get(_docs_url(ws, doc["id"]))).json()["versions"]
+        assert [v["decision"] for v in versions] == ["approved", "discarded", "approved"]
+
+
+async def test_a_malformed_id_in_a_detail_url_is_the_same_not_found(settings):
+    """A bad id and an unknown id get one answer, not a raw 422 (#15)."""
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        for path in (_docs_url(ws, "does-not-exist"), f"/api/workspaces/{ws}/entities/xyz"):
+            response = await owner.get(path)
+            assert (response.status_code, response.json()) == (
+                404,
+                {"detail": "Not found or not permitted."},
+            )

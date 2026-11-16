@@ -99,6 +99,11 @@
     overflow-wrap: anywhere;
   }
 
+  h1,
+  h2 {
+    overflow-wrap: anywhere;
+  }
+
   mark {
     background: var(--color-highlight);
     color: inherit;

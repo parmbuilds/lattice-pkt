@@ -3,12 +3,13 @@ import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api'
 import LoadState from '../components/LoadState.vue'
+import MarkedText from '../components/MarkedText.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusMessage from '../components/StatusMessage.vue'
 import { useAction, useLoad, useWorkspace } from '../session'
 
 type Entity = { id: string; name: string; aliases: string[] }
-type Mention = { version_id: string; document_id: string; title: string; spans: { start: number; end: number; term: string; snippet: string }[] }
+type Mention = { version_id: string; document_id: string; title: string; spans: { start: number; end: number; term: string; snippet: string; marks: [number, number][] }[] }
 type Detail = Entity & { mentions: Mention[]; co_mentions: { id: string; name: string }[] }
 
 // One page, two routes: the list at entities/ and one entity at entities/:entityId.
@@ -69,11 +70,11 @@ async function save(id: string) {
         <form v-if="editing === e.id" class="grid gap-3" @submit.prevent="save(e.id)">
           <label class="field">
             Name
-            <input v-model="editName" class="input" required />
+            <input v-model="editName" class="input" required :aria-label="`Name of ${e.name}`" />
           </label>
           <label class="field">
             Aliases (comma separated)
-            <input v-model="editAliases" class="input" />
+            <input v-model="editAliases" class="input" :aria-label="`Aliases of ${e.name}`" />
           </label>
           <div class="flex gap-2">
             <button type="submit" class="btn btn-primary">Save</button>
@@ -104,7 +105,9 @@ async function save(id: string) {
         <ul v-else class="sheet divide-y divide-rule">
           <li v-for="m in detail.data.mentions" :key="m.version_id" class="px-5 py-3">
             <RouterLink :to="`/w/${w.workspaceId}/documents/${m.document_id}`" class="font-medium">{{ m.title }}</RouterLink>
-            <p v-for="s in m.spans" :key="s.start" class="mt-1 max-w-[75ch] text-graphite">{{ s.snippet }}</p>
+            <p v-for="s in m.spans" :key="s.start" class="mt-1 max-w-[75ch] text-graphite">
+              <MarkedText :text="s.snippet" :marks="s.marks" />
+            </p>
           </li>
         </ul>
       </section>

@@ -121,6 +121,11 @@ async def upload(
                 status_code=409,
             )
     else:
+        if await intake.same_source_in(db, doc, digest):  # same bytes as a current version (R5)
+            response.status_code = 200
+            return _summary(doc, serving=doc.serving_version_id, pending=doc.pending_version_id) | {
+                "created": False
+            }
         title = intake.clean_title(
             title if title is not None else await intake.current_title(db, doc)
         )
@@ -247,8 +252,20 @@ async def get_document(document_id: UUID, request: Request, subject: Member, db:
         "shown_version_id": str(shown.id),
     }
     if sees_pending:  # author or manager: history, sharing and the last decision
+        # Each version's latest decision, so the history can say what happened to every version.
+        decisions = await db.execute(
+            select(VersionDecision.version_id, VersionDecision.decision)
+            .where(VersionDecision.document_id == doc.id)
+            .order_by(VersionDecision.created_at)
+        )
+        decided = dict(decisions.all())
         result["versions"] = [
-            {"id": str(vid), "title": title, "created_at": created_at.isoformat()}
+            {
+                "id": str(vid),
+                "title": title,
+                "created_at": created_at.isoformat(),
+                "decision": decided.get(vid),
+            }
             for vid, title, created_at in await db.execute(
                 select(DocumentVersion.id, DocumentVersion.title, DocumentVersion.created_at)
                 .where(DocumentVersion.document_id == doc.id)
@@ -277,7 +294,12 @@ async def get_document(document_id: UUID, request: Request, subject: Member, db:
             else None
         )
         # Derivation status of the current versions; no row yet means the worker will enqueue it.
-        current = [v for v in (doc.pending_version_id, doc.serving_version_id) if v]
+        # Withdrawal purges those rows, so a withdrawn document has nothing to report.
+        current = (
+            []
+            if doc.withdrawn_at
+            else [v for v in (doc.pending_version_id, doc.serving_version_id) if v]
+        )
         rows = {
             vid: {"status": status, "error": error}
             for vid, status, error in await db.execute(

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onUnmounted } from 'vue'
 import { ApiError, errorText, NOT_FOUND } from '../api'
 import LoadState from '../components/LoadState.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -11,6 +11,9 @@ const w = useWorkspace()
 const docs = useLoad<{ documents: DocumentSummary[] }>(() => (w.manager ? `${w.base}/documents` : null))
 const { message, run } = useAction()
 const pending = computed(() => docs.data?.documents.filter((d) => d.pending_version_id) ?? [])
+// Drafts can be replaced from another session; re-check now and then so a stale card is swapped out.
+const recheck = setInterval(docs.reload, 15_000)
+onUnmounted(() => clearInterval(recheck))
 
 // Server 409 details (services/documents.py, services/intake.py) mapped to what to do next.
 const conflicts: Record<string, string> = {

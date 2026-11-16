@@ -2,12 +2,12 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 from app.audit import authorize
 from app.auth import Member
 from app.db import DB
-from app.models import AuditEvent
+from app.models import AuditEvent, Membership, User
 from app.policy import Action
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/audit", tags=["audit"])
@@ -35,7 +35,26 @@ async def list_events(
     if since:
         query = query.where(AuditEvent.occurred_at >= since)
     events = await db.scalars(query.order_by(AuditEvent.id.desc()).limit(limit))
-    return {"events": [_event(e) for e in events]}
+    return {"events": [_event(e) for e in events], "actors": await _actors(db, subject)}
+
+
+async def _actors(db, subject) -> list[dict]:
+    """Everyone in this trail with their name; people who left the workspace keep their name."""
+    rows = await db.execute(
+        select(User.id, User.display_name, Membership.user_id.is_not(None))
+        .join(AuditEvent, AuditEvent.actor_user_id == User.id)
+        .outerjoin(
+            Membership,
+            and_(
+                Membership.user_id == User.id,
+                Membership.workspace_id == subject.workspace_id,
+            ),
+        )
+        .where(AuditEvent.workspace_id == subject.workspace_id)
+        .distinct()
+        .order_by(User.display_name)
+    )
+    return [{"user_id": str(uid), "name": name, "current": current} for uid, name, current in rows]
 
 
 def _event(e: AuditEvent) -> dict:

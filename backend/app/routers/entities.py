@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.audit import authorize, not_found, record
@@ -11,7 +11,7 @@ from app.auth import Member
 from app.db import DB, CommitThenRaise
 from app.models import Entity, EntityAlias
 from app.policy import Action, decide
-from app.services.graph import mentions
+from app.services.graph import mentions, passages
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/entities", tags=["entities"])
 
@@ -36,6 +36,33 @@ def _terms(request: Request, name: str | None, aliases: list[str] | None) -> Non
             raise HTTPException(
                 422, f"Names and aliases are 1-{settings.graph_max_alias_chars} characters."
             )
+
+
+async def _claim_terms(db, subject, terms: list[str], entity_id: UUID | None) -> None:
+    """Names and aliases share one namespace per workspace, ignoring case (R22).
+
+    The advisory lock holds until commit, so two writers cannot both claim a term.
+    """
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"entities:{subject.workspace_id}"},
+    )
+    lowered = [t.strip().lower() for t in terms]
+    taken = len(set(lowered)) != len(lowered)  # the same term twice in one request
+    if not taken:
+        names = select(Entity.id).where(
+            Entity.workspace_id == subject.workspace_id, func.lower(Entity.name).in_(lowered)
+        )
+        aliases = select(EntityAlias.id).where(
+            EntityAlias.workspace_id == subject.workspace_id,
+            func.lower(EntityAlias.alias).in_(lowered),
+        )
+        if entity_id is not None:  # an entity may keep its own names and aliases
+            names = names.where(Entity.id != entity_id)
+            aliases = aliases.where(EntityAlias.entity_id != entity_id)
+        taken = bool(await db.scalar(names.limit(1))) or bool(await db.scalar(aliases.limit(1)))
+    if taken:
+        raise HTTPException(409, "That name or alias is already in use.")
 
 
 async def _registry(db, subject) -> tuple[list[Entity], dict[UUID, list[str]]]:
@@ -96,18 +123,24 @@ async def get_entity(entity_id: UUID, subject: Member, db: DB) -> dict:
         await record(db, subject, denied, detail={"entity_id": str(entity_id)})
         raise CommitThenRaise(not_found())
     versions: dict[UUID, dict] = {}
-    for m in own:
+    for p in await passages(db, subject, own):
         entry = versions.setdefault(
-            m["version_id"],
+            p["version_id"],
             {
-                "version_id": str(m["version_id"]),
-                "document_id": str(m["document_id"]),
-                "title": m["title"],
+                "version_id": str(p["version_id"]),
+                "document_id": str(p["document_id"]),
+                "title": p["title"],
                 "spans": [],
             },
         )
         entry["spans"].append(
-            {"start": m["start"], "end": m["end"], "term": m["term"], "snippet": m["snippet"]}
+            {
+                "start": p["start"],
+                "end": p["end"],
+                "term": p["term"],
+                "snippet": p["snippet"],
+                "marks": p["marks"],
+            }
         )
     co_ids = {m["entity_id"] for m in found if m["version_id"] in versions} - {entity_id}
     await record(
@@ -143,6 +176,7 @@ async def create_entity(body: EntityBody, subject: Member, db: DB, request: Requ
         raise HTTPException(422, f"A workspace holds at most {cap} entities.")
     entity = Entity(workspace_id=subject.workspace_id, name=body.name.strip())
     aliases = [a.strip() for a in body.aliases]
+    await _claim_terms(db, subject, [entity.name, *aliases], None)
     try:
         async with db.begin_nested():
             db.add(entity)
@@ -165,6 +199,12 @@ async def update_entity(
     )
     _terms(request, body.name, body.aliases)
     entity = await _entity(db, subject, entity_id)
+    await _claim_terms(
+        db,
+        subject,
+        ([body.name] if body.name is not None else []) + (body.aliases or []),
+        entity.id,
+    )
     try:
         async with db.begin_nested():
             if body.name is not None:

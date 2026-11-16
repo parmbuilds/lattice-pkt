@@ -616,8 +616,9 @@ def g_entity(ctx: Ctx) -> None:
     assert ctx.body["aliases"] == _aliases_seen(ctx.actor) and ctx.body["co_mentions"] == []
     for mention in ctx.body["mentions"]:
         _, body = doc_row(ctx, mention["version_id"])
-        for span in mention["spans"]:
-            assert body[span["start"] : span["end"]].lower() == span["term"]
+        for span in mention["spans"]:  # a passage starts with its first match (see graph.passages)
+            assert body[span["start"] :].lower().startswith(span["term"].lower())
+            assert all(0 <= s < e <= len(span["snippet"]) for s, e in span["marks"])
     (row,) = ctx.audit
     assert {str(v) for v in row["returned_version_ids"]} == want
 

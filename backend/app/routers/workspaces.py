@@ -205,6 +205,12 @@ async def accept_invite(body: AcceptInvite, request: Request, user: SignedIn, db
         await record(
             db, subject, refusal, detail={"invite_id": str(invite.id)}, holder_of_secret=True
         )
+        if reason == "already_member":  # not a refusal: the invite stays pending for someone else
+            return {
+                "workspace_id": str(invite.workspace_id),
+                "role": subject.role,
+                "already_member": True,
+            }
         raise CommitThenRaise(not_found())
 
     # Conditional update: of two concurrent acceptances, exactly one claims the invite (R6).

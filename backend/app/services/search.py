@@ -25,6 +25,17 @@ MAX_SPANS = 3
 SNIPPET_CHARS = 200
 # Breaks up "[[" and "]]" in a best-span snippet so body text cannot pose as a match marker.
 _MARKER = re.compile(r"([\[\]])(?=\1)")
+_VOWEL = re.compile(r"[aeiouy]")
+
+
+def _is_gibberish(query: str) -> bool:
+    """True when every word is plain ASCII letters with no vowel, such as "zxqvbnmwq".
+
+    shortcut: a vowel test, not a dictionary. Random strings with a vowel still reach the vector
+    branch; upgrade to a dictionary check or a floor retuned on gibberish in the benchmark.
+    """
+    words = re.findall(r"\w+", query.lower())
+    return bool(words) and all(w.isascii() and w.isalpha() and not _VOWEL.search(w) for w in words)
 
 
 def _vector_candidates(subject: Subject, distance, current_hash: str, settings: Settings):
@@ -63,7 +74,8 @@ async def search(
     if not query:
         return []
     try:
-        query_vector = await embedder.embed_query(query)
+        # Gibberish gets no meaning match: it embeds close to short documents (R19).
+        query_vector = None if _is_gibberish(query) else await embedder.embed_query(query)
     except Exception:
         log.warning("query embedding failed; answering from keywords only", exc_info=True)
         query_vector = None  # every distance is NULL, so no chunk passes the floor (R19)

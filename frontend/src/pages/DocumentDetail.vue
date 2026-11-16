@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, ApiError, errorText } from '../api'
 import LoadState from '../components/LoadState.vue'
@@ -19,7 +19,7 @@ import {
   when,
 } from '../session'
 
-type Version = { id: string; title: string; created_at: string }
+type Version = { id: string; title: string; created_at: string; decision: string | null }
 type Detail = DocumentSummary & {
   title: string
   body: string
@@ -37,6 +37,16 @@ const path = computed(() => `${w.base}/documents/${String(route.params.documentI
 const load = useLoad<Detail>(() => path.value)
 const doc = computed(() => load.data)
 const { message, run } = useAction()
+
+// The worker readies drafts in the background: refresh until the shown version is no longer preparing.
+watch(
+  () => load.data,
+  (data, _old, onCleanup) => {
+    if (data?.derivations?.[data.shown_version_id]?.status !== 'pending') return
+    const timer = setTimeout(load.reload, 2000)
+    onCleanup(() => clearTimeout(timer))
+  },
+)
 
 const author = computed(() => doc.value?.author_id === w.userId)
 const showsDraft = computed(() => !!doc.value && doc.value.shown_version_id === doc.value.pending_version_id)
@@ -58,12 +68,14 @@ const serves = computed(() => {
   return r ? `REV ${r}, the approved version` : 'The approved version'
 })
 
-function versionStamp(v: Version, i: number): StampSpec {
+// Each version says what happened to it, not what happened to the document's last decision.
+function versionStamp(v: Version): StampSpec {
   const d = doc.value!
   if (v.id === d.serving_version_id) return d.withdrawn ? { kind: 'withdrawn', label: 'Withdrawn' } : { kind: 'approved', label: 'Serving' }
   if (v.id === d.pending_version_id) return { kind: 'draft', label: 'Draft' }
-  if (d.last_decision?.version_id === v.id && d.last_decision.decision === 'rejected') return { kind: 'rejected', label: 'Rejected' }
-  if (versions.value.findIndex((x) => x.id === d.serving_version_id) > i) return { kind: 'superseded', label: 'Superseded' }
+  if (v.decision === 'rejected') return { kind: 'rejected', label: 'Rejected' }
+  if (v.decision === 'discarded') return { kind: 'plain', label: 'Discarded' }
+  if (v.decision === 'approved') return { kind: 'superseded', label: 'Superseded' }
   return { kind: 'plain', label: 'Not approved' }
 }
 
@@ -101,8 +113,15 @@ async function uploadVersion() {
   const form = new FormData()
   form.append('file', picked)
   form.append('document_id', doc.value!.id)
-  if (await act(() => api(`${w.base}/documents/upload`, 'POST', form), 'New version uploaded as a draft; it awaits approval.'))
-    newFile.value!.value = ''
+  let created = true
+  const ok = await act(async () => {
+    created = (await api<{ created: boolean }>(`${w.base}/documents/upload`, 'POST', form)).created
+  }, '')
+  if (!ok) return
+  message.value = created
+    ? 'New version uploaded as a draft; it awaits approval.'
+    : 'That file is already the current version; nothing changed.'
+  newFile.value!.value = ''
 }
 
 // Earlier versions
@@ -157,7 +176,9 @@ const reassign = () =>
                 ? 'Kept for the record; never served again.'
                 : showsDraft
                   ? 'Showing the draft awaiting approval.'
-                  : 'Showing the approved version.'
+                  : doc.serving_version_id
+                    ? 'Showing the approved version.'
+                    : 'Showing a version that was never approved.'
             }}
           </span>
         </p>
@@ -277,7 +298,7 @@ const reassign = () =>
                 <td class="font-cond font-semibold">{{ revLetter(versions.length - 1 - i) }}</td>
                 <td class="text-sm">{{ when(v.created_at) }}</td>
                 <td>
-                  <Stamp :kind="versionStamp(v, versions.length - 1 - i).kind">{{ versionStamp(v, versions.length - 1 - i).label }}</Stamp>
+                  <Stamp :kind="versionStamp(v).kind">{{ versionStamp(v).label }}</Stamp>
                 </td>
                 <td class="text-right">
                   <button type="button" class="btn btn-quiet" :aria-label="`View REV ${revLetter(versions.length - 1 - i)}`" @click="view(v)">

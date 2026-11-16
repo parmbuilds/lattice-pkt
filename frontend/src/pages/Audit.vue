@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { NOT_FOUND } from '../api'
 import LoadState from '../components/LoadState.vue'
 import PageHeader from '../components/PageHeader.vue'
+import StatusMessage from '../components/StatusMessage.vue'
 import Stamp from '../components/Stamp.vue'
 import { shortId, useLoad, useWorkspace, when } from '../session'
 
@@ -21,12 +23,17 @@ type AuditEvent = {
   detail: unknown
 }
 
+type Actor = { user_id: string; name: string; current: boolean }
+
 const w = useWorkspace()
-const people = useLoad<{ members: { user_id: string; name: string }[] }>(() => `${w.base}/members`)
 const filters = reactive({ user_id: '', action: '', outcome: '', limit: '100' })
 const query = ref('')
-const events = useLoad<{ events: AuditEvent[] }>(() => `${w.base}/audit?${query.value}`)
-const names = computed(() => new Map(people.data?.members.map((m) => [m.user_id, m.name])))
+const events = useLoad<{ events: AuditEvent[]; actors: Actor[] }>(() =>
+  w.manager ? `${w.base}/audit?${query.value}` : null,
+)
+// Every person in the trail, so people who have left still have a name and can be filtered on.
+const actors = computed(() => events.data?.actors ?? [])
+const names = computed(() => new Map(actors.value.map((a) => [a.user_id, a.current ? a.name : `${a.name} (removed)`])))
 
 function submit() {
   const next = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString()
@@ -42,12 +49,13 @@ const json = (v: unknown) => JSON.stringify(v, null, 2)
     lede="Every decision, allowed or denied, from the web and from agents. Denials show here with their rule; to the requester they look like a missing document."
   />
 
-  <form class="mb-5 flex flex-wrap items-end gap-3" @submit.prevent="submit">
+  <StatusMessage v-if="!w.manager" :text="NOT_FOUND" />
+  <form v-if="w.manager" class="mb-5 flex flex-wrap items-end gap-3" @submit.prevent="submit">
     <label class="field">
       Person
       <select v-model="filters.user_id" class="input min-w-40">
         <option value="">Anyone</option>
-        <option v-for="m in people.data?.members" :key="m.user_id" :value="m.user_id">{{ m.name }}</option>
+        <option v-for="a in actors" :key="a.user_id" :value="a.user_id">{{ names.get(a.user_id) }}</option>
       </select>
     </label>
     <label class="field">
@@ -69,10 +77,10 @@ const json = (v: unknown) => JSON.stringify(v, null, 2)
     <button type="submit" class="btn btn-primary min-h-9">Filter</button>
   </form>
 
-  <div aria-live="polite">
+  <div v-if="w.manager" aria-live="polite">
     <LoadState :load="events" :empty="!events.data?.events.length" empty-text="No audit events match." />
   </div>
-  <div v-if="events.data?.events.length" class="sheet overflow-x-auto">
+  <div v-if="w.manager && events.data?.events.length" class="sheet overflow-x-auto">
     <table class="register">
       <thead>
         <tr>

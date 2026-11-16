@@ -232,7 +232,10 @@ async def test_an_extraction_past_its_timeout_is_rejected_and_its_child_is_gone(
     async with signed_in(quick) as owner:
         ws = await create_workspace(owner)
         response = await _upload(owner, ws, "rota.md", CLEAN_MD)
-        assert (response.status_code, response.json()) == (422, {"detail": "timeout"})
+        assert (response.status_code, response.json()) == (
+            422,
+            {"detail": "Reading this file took too long."},
+        )
         assert [child.returncode is not None for child in children] == [True]
         assert sql(pg, "SELECT outcome, reason FROM intakes WHERE workspace_id = %s", ws) == [
             ("rejected", "timeout")
@@ -244,7 +247,10 @@ async def test_an_unsupported_file_is_refused_and_recorded_without_bytes(setting
     async with signed_in(settings) as owner:
         ws = await create_workspace(owner)
         response = await _upload(owner, ws, name, b"MZ\x90\x00 a program")
-        assert (response.status_code, response.json()) == (415, {"detail": "unsupported"})
+        assert (response.status_code, response.json()) == (
+            415,
+            {"detail": "Only .md, .txt, .html, .pdf and .docx files are accepted."},
+        )
         ((outcome, reason, filename, receipt, receipt_sha, document_id, source),) = sql(
             pg,
             "SELECT outcome, reason, filename, receipt, receipt_sha256, document_id, "
@@ -269,7 +275,10 @@ async def test_a_body_too_diverse_to_index_is_refused_and_recorded(settings, pg)
     async with signed_in(settings) as owner:
         ws = await create_workspace(owner)
         response = await _upload(owner, ws, "words.txt", words.encode())
-        assert (response.status_code, response.json()) == (422, {"detail": "body_too_diverse"})
+        assert (response.status_code, response.json()) == (
+            422,
+            {"detail": "The text in this file is too unusual to index."},
+        )
         assert sql(pg, "SELECT outcome, reason FROM intakes WHERE workspace_id = %s", ws) == [
             ("rejected", "body_too_diverse")
         ]
@@ -411,3 +420,16 @@ async def test_a_personal_access_token_cannot_upload(settings, pg):
         {"detail": "Bearer tokens are for /mcp only."},
     )
     assert _stored(pg, ws) == NOTHING
+
+
+async def test_identical_bytes_as_a_new_version_are_not_added_again(settings, pg):
+    """Uploading the file a document already serves or awaits does not make a new revision (#10)."""
+    async with signed_in(settings) as owner:
+        ws = await create_workspace(owner)
+        doc = (await _upload(owner, ws, "rota.md", CLEAN_MD)).json()
+        same = await _upload(owner, ws, "rota.md", CLEAN_MD, document_id=doc["id"])
+        assert (same.status_code, same.json()["created"]) == (200, False)
+        assert same.json()["pending_version_id"] == doc["pending_version_id"]
+        assert _stored(pg, ws)["intakes"] == 1
+        changed = await _upload(owner, ws, "rota.md", b"Someone else.\n", document_id=doc["id"])
+        assert changed.status_code == 201 and changed.json()["created"] is True
