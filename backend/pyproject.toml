@@ -51,3 +51,8 @@ dev = [
     "ruff>=0.6",
     "testcontainers[postgres]>=4",
 ]
+
+[tool.uv]
+# shortcut: fastembed 0.9.0 caps pillow<13, but 13.0.0 fixes two decoder CVEs and Lattice only
+# embeds text; drop this override once fastembed allows Pillow 13.
+override-dependencies = ["pillow>=13.0.0"]
