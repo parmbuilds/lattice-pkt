@@ -1,0 +1,6 @@
+#!/bin/sh
+# Keep docs/decisions.md in step with the plans. Enable with: make hooks
+if git diff --cached --name-only | grep -q '^docs/plans/.*\.md$'; then
+	python3 scripts/sync_decisions.py || exit 1
+	git add docs/decisions.md
+fi

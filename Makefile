@@ -12,7 +12,7 @@ DEV_ENV := LATTICE_INSECURE_DEV_COOKIES=true LATTICE_PUBLIC_ORIGIN=http://localh
 	LATTICE_MIGRATION_DATABASE_URL=postgresql+psycopg://lattice_owner:lattice_owner_dev@localhost:$(DB_PORT)/lattice
 
 .DEFAULT_GOAL := help
-.PHONY: help build start dev stop restart down ps logs seed migrate psql backup restore test lint e2e
+.PHONY: help build start dev stop restart down ps logs seed migrate psql backup restore test lint e2e decisions hooks
 
 help: ## List the commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-9s %s\n", $$1, $$2}'
@@ -81,3 +81,11 @@ lint: ## Ruff, frontend lint and type-checked build
 
 e2e: ## Browser tests against the running stack (make start && make seed first)
 	cd frontend && npm run e2e
+
+decisions: ## Regenerate docs/decisions.md from the plans' decision sections
+	python3 scripts/sync_decisions.py
+
+hooks: ## Enable the pre-commit hook that keeps docs/decisions.md current
+	chmod +x .githooks/pre-commit
+	git config core.hooksPath .githooks
+	@echo 'pre-commit hook enabled'
